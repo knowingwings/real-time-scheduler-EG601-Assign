@@ -1,0 +1,61 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Project specific output and temp files
+results/single_processor/*
+results/multi_processor/*
+results/comparison/*
+!results/single_processor/.gitkeep
+!results/multi_processor/.gitkeep
+!results/comparison/.gitkeep
+
+# Logs
+*.log
+logs/
+log/
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+.ropeproject
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

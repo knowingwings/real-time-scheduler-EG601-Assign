@@ -1,28 +1,39 @@
 # Real-Time Task Scheduling on Raspberry Pi 3
 
-This project implements and analyzes various real-time task scheduling algorithms on a Raspberry Pi 3 using Python. It simulates 50 tasks with varying priorities, service times, and arrival patterns based on a Poisson distribution. Completed for EG6801 - Real-Time Embedded Systems at the University of Glouscestershire.
+This project implements and analyses various real-time task scheduling algorithms on a Raspberry Pi 3 using Python. It simulates 50 tasks with varying priorities, service times, and arrival patterns based on a Poisson distribution. Completed for EG6801 - Real-Time Embedded Systems at the University of Glouscestershire.
 
 ## Project Structure
 
 ```
 real-time-scheduler/
 ├── src/
+│   ├── __init__.py
 │   ├── task_generator.py       # Task generation with Poisson distribution
-│   ├── schedulers/             # Scheduling algorithms
+│   ├── schedulers/
+│   │   ├── __init__.py
 │   │   ├── fcfs.py             # First-Come-First-Served scheduler
 │   │   ├── edf.py              # Earliest Deadline First scheduler
 │   │   ├── priority_based.py   # Priority-based scheduler with inversion handling
 │   │   └── ml_scheduler.py     # Machine learning-based scheduler
-│   ├── processors/             # Processor implementations
-│   │   ├── single_processor.py
-│   │   └── multi_processor.py
-│   └── utils/                  # Utility functions
-│       ├── visualization.py    # Plotting and visualization tools
+│   ├── processors/
+│   │   ├── __init__.py
+│   │   ├── single_processor.py # Single processor implementation
+│   │   └── multi_processor.py  # Multi-processor with load balancing
+│   └── utils/
+│       ├── __init__.py
+│       ├── visualisation.py    # Plotting and visualisation tools
 │       └── metrics.py          # Performance metrics calculation
-├── test/                       # Test scripts
-├── results/                    # Results and visualizations
-├── config/                     # Configuration files
-│   └── params.py               # Parameters for task generation and scheduling
+├── test/
+│   ├── __init__.py
+│   ├── test_task_generator.py  # Tests for task generation
+│   ├── test_schedulers.py      # Tests for scheduler implementations
+│   └── test_processors.py      # Tests for processor implementations
+├── results/
+│   ├── single_processor/       # Single processor results
+│   ├── multi_processor/        # Multi-processor results
+│   └── comparison/             # Cross-platform comparisons
+├── config/
+│   └── params.py               # Configuration parameters
 ├── requirements.txt            # Project dependencies
 ├── main.py                     # Main execution script
 └── README.md                   # Project documentation
