@@ -48,7 +48,7 @@ class TaskGenerator:
     
     def __init__(self, config=None):
         """
-        Initialize task generator with configuration
+        Initialise task generator with configuration
         
         Args:
             config: Dictionary containing configuration parameters

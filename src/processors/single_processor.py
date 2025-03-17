@@ -18,7 +18,7 @@ class SingleProcessor:
     
     def __init__(self, scheduler, name="CPU-1"):
         """
-        Initialize single processor with a scheduler
+        Initialise single processor with a scheduler
         
         Args:
             scheduler: The scheduler instance to use
@@ -38,7 +38,7 @@ class SingleProcessor:
             'memory_usage': [],
             'timestamp': [],
             'throughput': [],  # Tasks per second
-            'utilization': []  # Percentage of time the processor is busy
+            'utilisation': []  # Percentage of time the processor is busy
         }
     
     def add_tasks(self, tasks):
@@ -157,11 +157,11 @@ class SingleProcessor:
             else:
                 throughput = 0
                 
-            # Calculate processor utilization
+            # Calculate processor utilisation
             if hasattr(self.scheduler, 'current_task') and self.scheduler.current_task:
-                utilization = 100  # Processor is busy
+                utilisation = 100  # Processor is busy
             else:
-                utilization = 0    # Processor is idle
+                utilisation = 0    # Processor is idle
             
             # Update metrics
             with self.scheduler.lock:
@@ -169,7 +169,7 @@ class SingleProcessor:
                 self.metrics['memory_usage'].append(memory_percent)
                 self.metrics['timestamp'].append(current_time)
                 self.metrics['throughput'].append(throughput)
-                self.metrics['utilization'].append(utilization)
+                self.metrics['utilisation'].append(utilisation)
             
             # Update last values
             last_completed = completed
@@ -185,14 +185,14 @@ class SingleProcessor:
         avg_cpu = sum(self.metrics['cpu_usage']) / len(self.metrics['cpu_usage']) if self.metrics['cpu_usage'] else 0
         avg_memory = sum(self.metrics['memory_usage']) / len(self.metrics['memory_usage']) if self.metrics['memory_usage'] else 0
         avg_throughput = sum(self.metrics['throughput']) / len(self.metrics['throughput']) if self.metrics['throughput'] else 0
-        avg_utilization = sum(self.metrics['utilization']) / len(self.metrics['utilization']) if self.metrics['utilization'] else 0
+        avg_utilisation = sum(self.metrics['utilisation']) / len(self.metrics['utilisation']) if self.metrics['utilisation'] else 0
         
         processor_metrics = {
             'name': self.name,
             'avg_cpu_usage': avg_cpu,
             'avg_memory_usage': avg_memory,
             'avg_throughput': avg_throughput,
-            'avg_utilization': avg_utilization,
+            'avg_utilisation': avg_utilisation,
             'cpu_usage_history': self.metrics['cpu_usage'],
             'memory_usage_history': self.metrics['memory_usage'],
             'timestamp_history': self.metrics['timestamp'],

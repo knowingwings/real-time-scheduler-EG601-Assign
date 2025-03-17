@@ -470,7 +470,7 @@ def plot_processor_comparison(single_metrics, multi_metrics, metric_name, title,
         plt.tight_layout()
         plt.show()
 
-# ===== Heatmap Visualization Functions =====
+# ===== Heatmap Visualisation Functions =====
 
 def create_performance_heatmaps(metrics, scheduler_name, output_path=None):
     """
@@ -486,17 +486,17 @@ def create_performance_heatmaps(metrics, scheduler_name, output_path=None):
         os.makedirs(output_path)
     
     # Create heatmaps for different metrics
-    create_cpu_utilization_heatmap(metrics, scheduler_name, output_path)
+    create_cpu_utilisation_heatmap(metrics, scheduler_name, output_path)
     create_memory_usage_heatmap(metrics, scheduler_name, output_path)
     create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path)
 
 
-def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
+def create_cpu_utilisation_heatmap(metrics, scheduler_name, output_path=None):
     """
-    Create a heatmap showing CPU utilization across time for multiple processors
+    Create a heatmap showing CPU utilisation across time for multiple processors
     
     Args:
-        metrics: Metrics dictionary containing CPU utilization data
+        metrics: Metrics dictionary containing CPU utilisation data
         scheduler_name: Name of the scheduler
         output_path: Base path for saving the heatmap
     """
@@ -506,9 +506,9 @@ def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
     per_processor_metrics = metrics.get('per_processor_metrics', [])
     
     if not per_processor_metrics:
-        plt.title(f"No CPU utilization data available for {scheduler_name}")
+        plt.title(f"No CPU utilisation data available for {scheduler_name}")
         if output_path:
-            plt.savefig(f"{output_path}/cpu_utilization_heatmap.png", dpi=300, bbox_inches='tight')
+            plt.savefig(f"{output_path}/cpu_utilisation_heatmap.png", dpi=300, bbox_inches='tight')
         return
     
     # Create data structure for the heatmap
@@ -572,7 +572,7 @@ def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
     else:
         relative_times = list(range(len(cpu_usage_data[0])))
     
-    # Create DataFrame with time bins for better visualization
+    # Create DataFrame with time bins for better visualisation
     df = pd.DataFrame()
     
     # Create time bins (10 bins)
@@ -619,7 +619,7 @@ def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
     # Set labels
     plt.xlabel('Time (seconds)')
     plt.ylabel('Processor')
-    plt.title(f'CPU Utilization Heatmap - {scheduler_name}')
+    plt.title(f'CPU Utilisation Heatmap - {scheduler_name}')
     
     # Set y-tick labels (processor names)
     processor_labels = [f"CPU-{i+1}" for i in range(processor_count)]
@@ -632,7 +632,7 @@ def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
     
     # Save the plot if output path is provided
     if output_path:
-        plt.savefig(f"{output_path}/cpu_utilization_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{output_path}/cpu_utilisation_heatmap.png", dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -852,7 +852,7 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     time_bins = np.linspace(0, max_time, 11)
     time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
     
-    # Normalize data for consistent visualization
+    # Normalise data for consistent visualisation
     max_cpu = max(cpu_usage) if cpu_usage else 100
     max_memory = max(memory_usage) if memory_usage else 100
     max_queue = max(queue_length) if queue_length else 1
@@ -862,9 +862,9 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     max_memory = max(max_memory, 0.1)
     max_queue = max(max_queue, 0.1)
     
-    normalized_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
-    normalized_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
-    normalized_queue = [min(value / max_queue * 100, 100) for value in queue_length]
+    normalised_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
+    normalised_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
+    normalised_queue = [min(value / max_queue * 100, 100) for value in queue_length]
     
     # Assign each timestamp to a bin
     time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
@@ -877,14 +877,14 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     # Calculate average value for each resource in each time bin
     for time_idx, bin_idx in enumerate(time_bin_indices):
         # Add values to the appropriate bin
-        if time_idx < len(normalized_cpu):
-            heatmap_data[0, bin_idx] += normalized_cpu[time_idx]
+        if time_idx < len(normalised_cpu):
+            heatmap_data[0, bin_idx] += normalised_cpu[time_idx]
         
-        if time_idx < len(normalized_memory):
-            heatmap_data[1, bin_idx] += normalized_memory[time_idx]
+        if time_idx < len(normalised_memory):
+            heatmap_data[1, bin_idx] += normalised_memory[time_idx]
         
-        if time_idx < len(normalized_queue):
-            heatmap_data[2, bin_idx] += normalized_queue[time_idx]
+        if time_idx < len(normalised_queue):
+            heatmap_data[2, bin_idx] += normalised_queue[time_idx]
     
     # Calculate bin averages
     for bin_idx in range(len(time_bins)-1):
@@ -1301,7 +1301,7 @@ def generate_report(single_metrics, multi_metrics, report_path):
                     ideal_speedup = processor_count
                     efficiency = (speedup / ideal_speedup) * 100
                     
-                    f.write(f"- **Parallelization Efficiency**: The multi-processor system achieved {efficiency:.1f}% of ideal speedup.\n")
+                    f.write(f"- **Parallelisation Efficiency**: The multi-processor system achieved {efficiency:.1f}% of ideal speedup.\n")
             
             # Check load balance
             load_balance = 0
@@ -1314,12 +1314,12 @@ def generate_report(single_metrics, multi_metrics, report_path):
                 if load_balance < 10:
                     f.write("- **Load Balancing**: Excellent load distribution across processors.\n")
                 elif load_balance < 20:
-                    f.write("- **Load Balancing**: Good load distribution, but some processors were underutilized.\n")
+                    f.write("- **Load Balancing**: Good load distribution, but some processors were underutilised.\n")
                 else:
                     f.write("- **Load Balancing**: Poor load distribution, significant processor imbalance.\n")
         
-        f.write(f"- **Resource Bottlenecks**: The heatmap analysis reveals patterns in resource utilization that can guide optimization efforts.\n")
+        f.write(f"- **Resource Bottlenecks**: The heatmap analysis reveals patterns in resource utilisation that can guide optimisation efforts.\n")
         
-        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems. The accompanying heatmaps provide additional insights into resource utilization and potential bottlenecks.")
+        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems. The accompanying heatmaps provide additional insights into resource utilisation and potential bottlenecks.")
     
     return report_path

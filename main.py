@@ -125,7 +125,7 @@ def run_single_processor(tasks, simulation=False):
     """
     logger.info("Starting single processor scheduling")
     
-    # Initialize schedulers
+    # Initialise schedulers
     schedulers = {
         'FCFS': FCFSScheduler(),
         'EDF': EDFScheduler(),
@@ -188,7 +188,7 @@ def run_single_processor(tasks, simulation=False):
                 f"{output_dir}/queue_length.png"
             )
             
-            # Calculate and visualize tasks by priority
+            # Calculate and visualise tasks by priority
             tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
             for task in scheduler.completed_tasks:
                 tasks_by_priority[task.priority.name] += 1
@@ -219,7 +219,7 @@ def run_single_processor(tasks, simulation=False):
                 f"{output_dir}/waiting_times_by_priority.png"
             )
             
-            # Generate heatmap visualizations
+            # Generate heatmap visualisations
             heatmap_dir = f"{output_dir}/heatmaps"
             os.makedirs(heatmap_dir, exist_ok=True)
             
@@ -258,7 +258,7 @@ def run_multi_processor(tasks, simulation=False):
     """
     logger.info("Starting multi-processor scheduling")
     
-    # Initialize schedulers for each core
+    # Initialise schedulers for each core
     scheduler_classes = {
         'FCFS': FCFSScheduler,
         'EDF': EDFScheduler,
@@ -353,7 +353,7 @@ def run_multi_processor(tasks, simulation=False):
                         f"{cpu_dir}/waiting_times_by_priority.png"
                     )
             
-            # Generate system-wide visualizations
+            # Generate system-wide visualisations
             
             # Aggregate all tasks across processors for a combined view
             all_completed_tasks = []
@@ -387,7 +387,7 @@ def run_multi_processor(tasks, simulation=False):
                 f"{output_dir}/queue_length.png"
             )
             
-            # Add priority distribution visualization
+            # Add priority distribution visualisation
             if 'tasks_by_priority' in metrics:
                 plot_priority_distribution(
                     metrics,
@@ -395,7 +395,7 @@ def run_multi_processor(tasks, simulation=False):
                     f"{output_dir}/priority_distribution.png"
                 )
             
-            # Add waiting times by priority visualization
+            # Add waiting times by priority visualisation
             if 'avg_waiting_by_priority' in metrics:
                 plot_waiting_times_by_priority(
                     metrics,
@@ -403,7 +403,7 @@ def run_multi_processor(tasks, simulation=False):
                     f"{output_dir}/waiting_times_by_priority.png"
                 )
             
-            # Generate heatmap visualizations
+            # Generate heatmap visualisations
             heatmap_dir = f"{output_dir}/heatmaps"
             os.makedirs(heatmap_dir, exist_ok=True)
             
@@ -696,7 +696,7 @@ def parse_arguments():
 
 def main():
     """Main execution function"""
-    # Initialize logging
+    # Initialise logging
     global logger
     logger = setup_logging()
     

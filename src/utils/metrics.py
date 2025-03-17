@@ -1,7 +1,7 @@
 """
 Performance Metrics Calculation
 
-This module calculates and analyzes performance metrics for task scheduling.
+This module calculates and analyses performance metrics for task scheduling.
 """
 
 import numpy as np
@@ -10,10 +10,10 @@ from collections import defaultdict
 from src.task_generator import Priority
 
 class MetricsCalculator:
-    """Calculator for analyzing scheduler performance metrics"""
+    """Calculator for analysing scheduler performance metrics"""
     
     def __init__(self):
-        """Initialize metrics calculator"""
+        """Initialise metrics calculator"""
         pass
         
     def calculate_task_metrics(self, completed_tasks):
@@ -210,7 +210,7 @@ class MetricsCalculator:
     
     def calculate_processor_metrics(self, processor_metrics, throughput_history=None):
         """
-        Calculate metrics for processor utilization
+        Calculate metrics for processor utilisation
         
         Args:
             processor_metrics: Dictionary containing processor metrics
@@ -357,9 +357,9 @@ class MetricsCalculator:
         
         return comparison
     
-    def analyze_ml_metrics(self, ml_metrics):
+    def analyse_ml_metrics(self, ml_metrics):
         """
-        Analyze machine learning scheduler performance
+        Analyse machine learning scheduler performance
         
         Args:
             ml_metrics: Metrics from ML-based scheduler
@@ -372,7 +372,7 @@ class MetricsCalculator:
         
         analysis = {}
         
-        # Analyze prediction error
+        # Analyse prediction error
         avg_error = ml_metrics.get('average_prediction_error', 0)
         prediction_errors = ml_metrics.get('prediction_errors', [])
         

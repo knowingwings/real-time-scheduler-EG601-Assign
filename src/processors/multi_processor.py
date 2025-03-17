@@ -24,7 +24,7 @@ class MultiProcessor:
     
     def __init__(self, schedulers, processor_count=4, strategy="round_robin"):
         """
-        Initialize multi-processor system
+        Initialise multi-processor system
         
         Args:
             schedulers: List of scheduler instances to use (one per processor)

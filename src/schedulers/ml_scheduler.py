@@ -19,7 +19,7 @@ class MLScheduler:
     Machine Learning-Based Scheduler
     
     Uses a simple linear regression model to predict task execution time
-    and optimize scheduling decisions.
+    and optimise scheduling decisions.
     """
     
     def __init__(self, history_size=50):
@@ -165,7 +165,7 @@ class MLScheduler:
                 if simulation:
                     # Simulate execution by advancing time
                     self.current_time += task.service_time
-                    time.sleep(task.service_time / speed_factor)  # Still sleep a bit for visualization
+                    time.sleep(task.service_time / speed_factor)  # Still sleep a bit for visualisation
                 else:
                     # Actually sleep for the service time in real execution
                     time.sleep(task.service_time)

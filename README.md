@@ -45,10 +45,10 @@ real-time-scheduler/
 - **Processor Configurations**:
   - Single-Processor Execution
   - Multi-Processor Execution with different load-balancing strategies
-- **Analysis and Visualization**:
+- **Analysis and Visualisation**:
   - Waiting time analysis
-  - Task completion visualization
-  - Memory utilization monitoring
+  - Task completion visualisation
+  - Memory utilisation monitoring
   - Algorithm comparison
 
 ## Installation
@@ -107,7 +107,7 @@ The project supports performance comparison across different platforms:
 
 ## Output
 
-- **Visualization**: Charts and graphs are saved in the `results/` directory
+- **Visualisation**: Charts and graphs are saved in the `results/` directory
 - **Metrics**: Performance metrics are calculated and displayed for all schedulers
 - **Reports**: A comprehensive report is generated in `results/comparison/performance_report.md`
 
