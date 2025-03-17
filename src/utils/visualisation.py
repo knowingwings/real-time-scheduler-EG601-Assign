@@ -1,7 +1,8 @@
 """
 Visualisation Utilities
 
-This module provides functions for visualising task scheduling results.
+This module provides functions for visualising task scheduling results,
+including line plots, bar charts, heatmaps, and report generation.
 """
 
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 from datetime import datetime
 import os
+from matplotlib.colors import LinearSegmentedColormap
 
 def ensure_output_dir(path='results'):
     """Ensure the output directory exists"""
@@ -468,6 +470,558 @@ def plot_processor_comparison(single_metrics, multi_metrics, metric_name, title,
         plt.tight_layout()
         plt.show()
 
+# ===== Heatmap Visualization Functions =====
+
+def create_performance_heatmaps(metrics, scheduler_name, output_path=None):
+    """
+    Create heatmaps for various system performance metrics
+    
+    Args:
+        metrics: Metrics dictionary containing time-series performance data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmaps
+    """
+    # Create output directory if it doesn't exist
+    if output_path and not os.path.exists(output_path):
+        os.makedirs(output_path)
+    
+    # Create heatmaps for different metrics
+    create_cpu_utilization_heatmap(metrics, scheduler_name, output_path)
+    create_memory_usage_heatmap(metrics, scheduler_name, output_path)
+    create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path)
+
+
+def create_cpu_utilization_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing CPU utilization across time for multiple processors
+    
+    Args:
+        metrics: Metrics dictionary containing CPU utilization data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(12, 8))
+    
+    # Check for required data
+    per_processor_metrics = metrics.get('per_processor_metrics', [])
+    
+    if not per_processor_metrics:
+        plt.title(f"No CPU utilization data available for {scheduler_name}")
+        if output_path:
+            plt.savefig(f"{output_path}/cpu_utilization_heatmap.png", dpi=300, bbox_inches='tight')
+        return
+    
+    # Create data structure for the heatmap
+    processor_count = len(per_processor_metrics)
+    
+    # Try to find CPU usage history
+    cpu_usage_data = []
+    timestamps = []
+    
+    # First try to find common timestamps
+    for proc_metrics in per_processor_metrics:
+        if 'timestamp' in proc_metrics and isinstance(proc_metrics['timestamp'], list):
+            timestamps = proc_metrics['timestamp']
+            break
+    
+    # If no timestamps found, try timestamp_history
+    if not timestamps and 'timestamp_history' in metrics:
+        timestamps = metrics['timestamp_history']
+    
+    # If still no timestamps, create a default range
+    if not timestamps:
+        timestamps = list(range(10))  # Default range if no timestamps found
+    
+    # Get CPU usage data
+    for i, proc_metrics in enumerate(per_processor_metrics):
+        cpu_usage = []
+        
+        # Try different possible keys for CPU usage history
+        if 'cpu_usage_history' in proc_metrics:
+            cpu_usage = proc_metrics['cpu_usage_history']
+        elif 'cpu_usage' in proc_metrics and isinstance(proc_metrics['cpu_usage'], list):
+            cpu_usage = proc_metrics['cpu_usage']
+        
+        # If no CPU usage history, use average CPU usage to create a constant line
+        if not cpu_usage and 'avg_cpu_usage' in proc_metrics:
+            cpu_usage = [proc_metrics['avg_cpu_usage']] * len(timestamps)
+        
+        # Ensure data is the same length as timestamps
+        if cpu_usage:
+            # Trim or extend to match timestamp length
+            if len(cpu_usage) > len(timestamps):
+                cpu_usage = cpu_usage[:len(timestamps)]
+            elif len(cpu_usage) < len(timestamps):
+                # Extend with the last value or zero
+                last_value = cpu_usage[-1] if cpu_usage else 0
+                cpu_usage.extend([last_value] * (len(timestamps) - len(cpu_usage)))
+        else:
+            # If no data, use zeros
+            cpu_usage = [0] * len(timestamps)
+        
+        cpu_usage_data.append(cpu_usage)
+    
+    # Create a DataFrame for the heatmap
+    if timestamps and timestamps[0] is not None:
+        # Convert timestamps to relative time if they're absolute timestamps
+        if isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:  # Likely a Unix timestamp
+            start_time = timestamps[0]
+            relative_times = [t - start_time for t in timestamps]
+        else:
+            relative_times = timestamps
+    else:
+        relative_times = list(range(len(cpu_usage_data[0])))
+    
+    # Create DataFrame with time bins for better visualization
+    df = pd.DataFrame()
+    
+    # Create time bins (10 bins)
+    max_time = max(relative_times)
+    time_bins = np.linspace(0, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
+    
+    # Assign each timestamp to a bin
+    time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
+    time_bin_indices = np.clip(time_bin_indices, 0, len(time_bins)-2)
+    
+    # Calculate average CPU usage for each processor in each time bin
+    heatmap_data = np.zeros((processor_count, len(time_bins)-1))
+    
+    for proc_idx in range(processor_count):
+        cpu_usage = cpu_usage_data[proc_idx]
+        if not cpu_usage:
+            continue
+            
+        for time_idx, bin_idx in enumerate(time_bin_indices):
+            if time_idx < len(cpu_usage):
+                # Add CPU usage to the appropriate bin
+                heatmap_data[proc_idx, bin_idx] += cpu_usage[time_idx]
+        
+        # Calculate averages
+        for bin_idx in range(len(time_bins)-1):
+            # Count how many timestamps fall into this bin
+            count = np.sum(time_bin_indices == bin_idx)
+            if count > 0:
+                heatmap_data[proc_idx, bin_idx] /= count
+    
+    # Create the heatmap
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap="YlOrRd",
+        vmin=0,
+        vmax=100,
+        annot=True,
+        fmt=".1f",
+        linewidths=0.5,
+        cbar_kws={'label': 'CPU Usage (%)'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Processor')
+    plt.title(f'CPU Utilization Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels (processor names)
+    processor_labels = [f"CPU-{i+1}" for i in range(processor_count)]
+    ax.set_yticklabels(processor_labels, rotation=0)
+    
+    # Set x-tick labels (time bins)
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        plt.savefig(f"{output_path}/cpu_utilization_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+def create_memory_usage_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing memory usage patterns over time
+    
+    Args:
+        metrics: Metrics dictionary containing memory usage data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Check for required data
+    memory_usage = metrics.get('memory_usage_history', [])
+    timestamps = metrics.get('timestamp_history', [])
+    
+    # Try alternative keys if not found
+    if not memory_usage and 'memory_usage' in metrics and isinstance(metrics['memory_usage'], list):
+        memory_usage = metrics['memory_usage']
+    
+    if not timestamps and 'timestamp' in metrics and isinstance(metrics['timestamp'], list):
+        timestamps = metrics['timestamp']
+    
+    if not memory_usage or not timestamps:
+        plt.title(f"No memory usage data available for {scheduler_name}")
+        if output_path:
+            plt.savefig(f"{output_path}/memory_usage_heatmap.png", dpi=300, bbox_inches='tight')
+        return
+    
+    # Ensure same length
+    min_length = min(len(memory_usage), len(timestamps))
+    memory_usage = memory_usage[:min_length]
+    timestamps = timestamps[:min_length]
+    
+    if min_length == 0:
+        plt.title(f"No memory usage data available for {scheduler_name}")
+        if output_path:
+            plt.savefig(f"{output_path}/memory_usage_heatmap.png", dpi=300, bbox_inches='tight')
+        return
+    
+    # Convert timestamps to relative time
+    if isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:  # Likely a Unix timestamp
+        start_time = timestamps[0]
+        relative_times = [t - start_time for t in timestamps]
+    else:
+        relative_times = timestamps
+    
+    # Create time bins (10 bins)
+    max_time = max(relative_times)
+    time_bins = np.linspace(0, max_time, 11)
+    
+    # Create memory usage bins (10 bins) - reversed to have higher values at the top
+    max_memory = max(memory_usage)
+    memory_bins = np.linspace(0, max_memory if max_memory > 0 else 100, 11)
+    
+    # Create a 2D histogram of memory usage over time
+    hist, x_edges, y_edges = np.histogram2d(
+        relative_times, 
+        memory_usage, 
+        bins=[time_bins, memory_bins]
+    )
+    
+    # Create a heatmap
+    plt.figure(figsize=(12, 8))
+    
+    # Transpose to have time on x-axis and memory usage on y-axis
+    hist = hist.T
+    
+    # IMPORTANT: Flip the matrix vertically so higher values appear at the top
+    # This reverses the rows of the histogram
+    hist = np.flipud(hist)
+    
+    # Create readable bin labels
+    time_bin_labels = [f"{time_bins[i]:.1f}" for i in range(len(time_bins))]
+    
+    # Create memory bin labels, but reverse them to match the flipped histogram
+    memory_bin_labels = [f"{memory_bins[i]:.1f}" for i in range(len(memory_bins))]
+    memory_bin_labels.reverse()  # Reverse to have higher values at the top
+    
+    # Plot the heatmap
+    ax = sns.heatmap(
+        hist,
+        cmap="YlGnBu",
+        annot=True,
+        fmt="g",
+        linewidths=0.5,
+        cbar_kws={'label': 'Frequency'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Memory Usage (%)')
+    plt.title(f'Memory Usage Heatmap - {scheduler_name}')
+    
+    # Set tick labels
+    ax.set_xticklabels(time_bin_labels[:-1], rotation=45, ha='right')
+    ax.set_yticklabels(memory_bin_labels[:-1], rotation=0)
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        plt.savefig(f"{output_path}/memory_usage_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing resource bottlenecks (CPU, memory, queue length)
+    
+    Args:
+        metrics: Metrics dictionary containing resource usage data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(14, 8))
+    
+    # Extract data from metrics
+    timestamps = metrics.get('timestamp_history', [])
+    
+    # Try alternative timestamp key if not found
+    if not timestamps and 'timestamp' in metrics and isinstance(metrics['timestamp'], list):
+        timestamps = metrics['timestamp']
+    
+    # If still no timestamps, create a default range
+    if not timestamps:
+        timestamps = list(range(10))  # Default range if no timestamps found
+    
+    # Gather resource metrics
+    memory_usage = metrics.get('memory_usage_history', [])
+    queue_length = metrics.get('queue_length_history', [])
+    
+    # Try alternative keys
+    if not memory_usage and 'memory_usage' in metrics and isinstance(metrics['memory_usage'], list):
+        memory_usage = metrics['memory_usage']
+    
+    if not queue_length and 'queue_length' in metrics and isinstance(metrics['queue_length'], list):
+        queue_length = metrics['queue_length']
+    
+    # Get CPU usage from processor metrics
+    per_processor_metrics = metrics.get('per_processor_metrics', [])
+    cpu_usage = []
+    
+    if per_processor_metrics:
+        # Average CPU usage across all processors
+        for t_idx in range(len(timestamps)):
+            total_cpu = 0
+            count = 0
+            
+            for proc_metrics in per_processor_metrics:
+                if ('cpu_usage_history' in proc_metrics and 
+                    isinstance(proc_metrics['cpu_usage_history'], list) and 
+                    t_idx < len(proc_metrics['cpu_usage_history'])):
+                    total_cpu += proc_metrics['cpu_usage_history'][t_idx]
+                    count += 1
+                elif ('cpu_usage' in proc_metrics and 
+                      isinstance(proc_metrics['cpu_usage'], list) and 
+                      t_idx < len(proc_metrics['cpu_usage'])):
+                    total_cpu += proc_metrics['cpu_usage'][t_idx]
+                    count += 1
+            
+            if count > 0:
+                cpu_usage.append(total_cpu / count)
+            else:
+                # If no data, use the last known value or zero
+                cpu_usage.append(cpu_usage[-1] if cpu_usage else 0)
+    
+    # Ensure all lists are the same length as timestamps
+    min_length = len(timestamps)
+    
+    # Trim or extend memory usage
+    if memory_usage:
+        if len(memory_usage) > min_length:
+            memory_usage = memory_usage[:min_length]
+        elif len(memory_usage) < min_length:
+            # Extend with the last value or zero
+            last_value = memory_usage[-1] if memory_usage else 0
+            memory_usage.extend([last_value] * (min_length - len(memory_usage)))
+    else:
+        memory_usage = [0] * min_length
+    
+    # Trim or extend queue length
+    if queue_length:
+        if len(queue_length) > min_length:
+            queue_length = queue_length[:min_length]
+        elif len(queue_length) < min_length:
+            # Extend with the last value or zero
+            last_value = queue_length[-1] if queue_length else 0
+            queue_length.extend([last_value] * (min_length - len(queue_length)))
+    else:
+        queue_length = [0] * min_length
+    
+    # Trim or extend CPU usage
+    if cpu_usage:
+        if len(cpu_usage) > min_length:
+            cpu_usage = cpu_usage[:min_length]
+        elif len(cpu_usage) < min_length:
+            # Extend with the last value or zero
+            last_value = cpu_usage[-1] if cpu_usage else 0
+            cpu_usage.extend([last_value] * (min_length - len(cpu_usage)))
+    else:
+        cpu_usage = [0] * min_length
+    
+    # Convert timestamps to relative time
+    if timestamps and isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:
+        start_time = timestamps[0]
+        relative_times = [t - start_time for t in timestamps]
+    else:
+        relative_times = list(range(len(timestamps)))
+    
+    # Create time bins (10 bins)
+    max_time = max(relative_times) if relative_times else 10
+    time_bins = np.linspace(0, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
+    
+    # Normalize data for consistent visualization
+    max_cpu = max(cpu_usage) if cpu_usage else 100
+    max_memory = max(memory_usage) if memory_usage else 100
+    max_queue = max(queue_length) if queue_length else 1
+    
+    # Avoid division by zero
+    max_cpu = max(max_cpu, 0.1)
+    max_memory = max(max_memory, 0.1)
+    max_queue = max(max_queue, 0.1)
+    
+    normalized_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
+    normalized_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
+    normalized_queue = [min(value / max_queue * 100, 100) for value in queue_length]
+    
+    # Assign each timestamp to a bin
+    time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
+    time_bin_indices = np.clip(time_bin_indices, 0, len(time_bins)-2)
+    
+    # Create data for the heatmap
+    resources = ['CPU', 'Memory', 'Queue']
+    heatmap_data = np.zeros((len(resources), len(time_bins)-1))
+    
+    # Calculate average value for each resource in each time bin
+    for time_idx, bin_idx in enumerate(time_bin_indices):
+        # Add values to the appropriate bin
+        if time_idx < len(normalized_cpu):
+            heatmap_data[0, bin_idx] += normalized_cpu[time_idx]
+        
+        if time_idx < len(normalized_memory):
+            heatmap_data[1, bin_idx] += normalized_memory[time_idx]
+        
+        if time_idx < len(normalized_queue):
+            heatmap_data[2, bin_idx] += normalized_queue[time_idx]
+    
+    # Calculate bin averages
+    for bin_idx in range(len(time_bins)-1):
+        # Count timestamps in this bin
+        count = np.sum(time_bin_indices == bin_idx)
+        if count > 0:
+            heatmap_data[:, bin_idx] /= count
+    
+    # Create a custom colormap that goes from green to red
+    cmap = LinearSegmentedColormap.from_list('GYR', [(0, 'green'), (0.5, 'yellow'), (1, 'red')])
+    
+    # Create the heatmap
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap=cmap,
+        vmin=0,
+        vmax=100,
+        annot=True,
+        fmt=".1f",
+        linewidths=0.5,
+        cbar_kws={'label': 'Resource Usage (%)'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Resource')
+    plt.title(f'Resource Bottleneck Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels
+    ax.set_yticklabels(resources, rotation=0)
+    
+    # Set x-tick labels
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        plt.savefig(f"{output_path}/resource_bottleneck_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+def create_task_density_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing task density patterns over time by priority level
+    
+    Args:
+        metrics: Metrics dictionary containing task execution data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Check for required data
+    per_processor_metrics = metrics.get('per_processor_metrics', [])
+    
+    # Gather all tasks across all processors
+    all_tasks = []
+    for proc_idx, proc_metrics in enumerate(per_processor_metrics):
+        if 'completed_tasks' in proc_metrics and isinstance(proc_metrics['completed_tasks'], list):
+            # Add processor index to track which CPU processed each task
+            for task in proc_metrics['completed_tasks']:
+                if hasattr(task, 'start_time') and task.start_time is not None:
+                    all_tasks.append({
+                        'processor': proc_idx,
+                        'start_time': task.start_time,
+                        'completion_time': task.completion_time if hasattr(task, 'completion_time') else task.start_time + task.service_time,
+                        'priority': task.priority.name if hasattr(task, 'priority') else 'UNKNOWN'
+                    })
+    
+    if not all_tasks:
+        plt.title(f"No task execution data available for {scheduler_name}")
+        if output_path:
+            plt.savefig(f"{output_path}/task_density_heatmap.png", dpi=300, bbox_inches='tight')
+        return
+    
+    # Create a DataFrame for easier analysis
+    df = pd.DataFrame(all_tasks)
+    
+    # Create a time range
+    min_time = df['start_time'].min()
+    max_time = df['completion_time'].max()
+    
+    # Create time bins (10 bins)
+    time_bins = np.linspace(min_time, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
+    
+    # Count tasks in each time bin for each priority level
+    priority_levels = ['HIGH', 'MEDIUM', 'LOW']
+    heatmap_data = np.zeros((len(priority_levels), len(time_bins)-1))
+    
+    for _, task in df.iterrows():
+        # Find which time bins this task spans
+        start_bin = np.searchsorted(time_bins, task['start_time']) - 1
+        end_bin = np.searchsorted(time_bins, task['completion_time']) - 1
+        
+        # Clip to valid bin indices
+        start_bin = max(0, min(start_bin, len(time_bins)-2))
+        end_bin = max(0, min(end_bin, len(time_bins)-2))
+        
+        # Add task to all bins it spans
+        priority_idx = priority_levels.index(task['priority']) if task['priority'] in priority_levels else 0
+        
+        for bin_idx in range(start_bin, end_bin + 1):
+            heatmap_data[priority_idx, bin_idx] += 1
+    
+    # Create the heatmap
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap="viridis",
+        annot=True,
+        fmt="g",
+        linewidths=0.5,
+        cbar_kws={'label': 'Number of Active Tasks'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Priority Level')
+    plt.title(f'Task Density Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels
+    ax.set_yticklabels(priority_levels, rotation=0)
+    
+    # Set x-tick labels
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        plt.savefig(f"{output_path}/task_density_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
 def get_priority_color(priority):
     """Get color based on task priority"""
     colors = {
@@ -764,6 +1318,8 @@ def generate_report(single_metrics, multi_metrics, report_path):
                 else:
                     f.write("- **Load Balancing**: Poor load distribution, significant processor imbalance.\n")
         
-        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems.")
+        f.write(f"- **Resource Bottlenecks**: The heatmap analysis reveals patterns in resource utilization that can guide optimization efforts.\n")
+        
+        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems. The accompanying heatmaps provide additional insights into resource utilization and potential bottlenecks.")
     
     return report_path

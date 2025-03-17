@@ -25,7 +25,7 @@ from src.utils.visualisation import (
     plot_task_completion, plot_waiting_times, plot_memory_usage,
     plot_queue_length, plot_algorithm_comparison, plot_processor_comparison,
     plot_priority_distribution, plot_waiting_times_by_priority,
-    generate_report
+    generate_report, create_performance_heatmaps
 )
 from src.utils.metrics import MetricsCalculator
 from config.params import (
@@ -33,17 +33,34 @@ from config.params import (
     SIMULATION, ML_SCHEDULER, COMPARISON, VISUALISATION
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('scheduler.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+def setup_logging():
+    """Set up logging to write to results/logs directory"""
+    # Create logs directory if it doesn't exist
+    logs_dir = 'results/logs'
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Generate log filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = os.path.join(logs_dir, f'scheduler_{timestamp}.log')
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # Get the root logger and add a message about where logs are being saved
+    logger = logging.getLogger()
+    logger.info(f"Logging to file: {log_file}")
+    
+    return logger
 
-logger = logging.getLogger(__name__)
+# Global logger will be set up when this module is imported
+logger = None
 
 def setup_output_dirs():
     """Set up output directories for results"""
@@ -201,6 +218,27 @@ def run_single_processor(tasks, simulation=False):
                 f"{name} on Single Processor",
                 f"{output_dir}/waiting_times_by_priority.png"
             )
+            
+            # Generate heatmap visualizations
+            heatmap_dir = f"{output_dir}/heatmaps"
+            os.makedirs(heatmap_dir, exist_ok=True)
+            
+            try:
+                # Add processor metrics to make it compatible with heatmap functions
+                heatmap_metrics = metrics.copy()
+                heatmap_metrics['per_processor_metrics'] = [metrics]
+                
+                # Generate performance heatmaps
+                create_performance_heatmaps(
+                    heatmap_metrics,
+                    f"{name} on Single Processor",
+                    heatmap_dir
+                )
+                
+                # Log successful heatmap generation
+                logger.info(f"Generated performance heatmaps for {name} scheduler on single processor")
+            except Exception as e:
+                logger.error(f"Error generating heatmaps for {name} scheduler on single processor: {e}")
         
         logger.info(f"Completed {name} scheduler on single processor")
     
@@ -265,21 +303,75 @@ def run_multi_processor(tasks, simulation=False):
             output_dir = f"results/multi_processor/{name}"
             os.makedirs(output_dir, exist_ok=True)
             
-            # Generate plots
-            # For task completion and waiting times, we'll use the first processor's data
-            first_processor = processor.processors[0]
+            # Generate per-processor visualisations for all processors
+            for i, proc in enumerate(processor.processors):
+                if len(proc.scheduler.completed_tasks) > 0:
+                    # Create CPU-specific output directory
+                    cpu_dir = f"{output_dir}/CPU-{i+1}"
+                    os.makedirs(cpu_dir, exist_ok=True)
+                    
+                    # Generate task completion plot for this CPU
+                    plot_task_completion(
+                        proc.scheduler.completed_tasks, 
+                        f"{name} on CPU-{i+1}",
+                        f"{cpu_dir}/task_completion.png"
+                    )
+                    
+                    # Generate waiting times plot for this CPU
+                    plot_waiting_times(
+                        proc.scheduler.completed_tasks,
+                        f"{name} on CPU-{i+1}",
+                        f"{cpu_dir}/waiting_times.png"
+                    )
+                    
+                    # Add CPU-specific priority distribution
+                    cpu_tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+                    for task in proc.scheduler.completed_tasks:
+                        cpu_tasks_by_priority[task.priority.name] += 1
+                    
+                    cpu_metrics = {'tasks_by_priority': cpu_tasks_by_priority}
+                    
+                    plot_priority_distribution(
+                        cpu_metrics,
+                        f"{name} on CPU-{i+1}",
+                        f"{cpu_dir}/priority_distribution.png"
+                    )
+                    
+                    # Calculate and plot waiting times by priority for this CPU
+                    waiting_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+                    for task in proc.scheduler.completed_tasks:
+                        if task.waiting_time is not None:
+                            waiting_by_priority[task.priority.name].append(task.waiting_time)
+                    
+                    avg_waiting_by_priority = {}
+                    for priority, times in waiting_by_priority.items():
+                        avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
+                    
+                    plot_waiting_times_by_priority(
+                        {'avg_waiting_by_priority': avg_waiting_by_priority},
+                        f"{name} on CPU-{i+1}",
+                        f"{cpu_dir}/waiting_times_by_priority.png"
+                    )
             
-            if len(first_processor.scheduler.completed_tasks) > 0:
+            # Generate system-wide visualizations
+            
+            # Aggregate all tasks across processors for a combined view
+            all_completed_tasks = []
+            for proc in processor.processors:
+                all_completed_tasks.extend(proc.scheduler.completed_tasks)
+            
+            if all_completed_tasks:
+                # Generate combined task completion and waiting times plots
                 plot_task_completion(
-                    first_processor.scheduler.completed_tasks, 
-                    f"{name} on CPU-1 (Multi-Processor)",
-                    f"{output_dir}/task_completion_cpu1.png"
+                    all_completed_tasks, 
+                    f"{name} on Multi-Processor (All CPUs)",
+                    f"{output_dir}/task_completion_all_cpus.png"
                 )
                 
                 plot_waiting_times(
-                    first_processor.scheduler.completed_tasks,
-                    f"{name} on CPU-1 (Multi-Processor)",
-                    f"{output_dir}/waiting_times_cpu1.png"
+                    all_completed_tasks,
+                    f"{name} on Multi-Processor (All CPUs)",
+                    f"{output_dir}/waiting_times_all_cpus.png"
                 )
             
             # For system-wide metrics
@@ -311,26 +403,23 @@ def run_multi_processor(tasks, simulation=False):
                     f"{output_dir}/waiting_times_by_priority.png"
                 )
             
-            # Generate per-processor visualisations
-            for i, proc in enumerate(processor.processors):
-                if len(proc.scheduler.completed_tasks) > 0:
-                    # Add CPU-specific priority distribution
-                    cpu_tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
-                    for task in proc.scheduler.completed_tasks:
-                        cpu_tasks_by_priority[task.priority.name] += 1
-                    
-                    cpu_metrics = {'tasks_by_priority': cpu_tasks_by_priority}
-                    
-                    plot_priority_distribution(
-                        cpu_metrics,
-                        f"{name} on CPU-{i+1}",
-                        f"{output_dir}/priority_distribution_cpu{i+1}.png"
-                    )
-        
-        logger.info(f"Completed {name} scheduler on multi-processor")
-    
-    logger.info("Completed all multi-processor scheduling")
-    return results
+            # Generate heatmap visualizations
+            heatmap_dir = f"{output_dir}/heatmaps"
+            os.makedirs(heatmap_dir, exist_ok=True)
+            
+            try:
+                # Generate performance heatmaps
+                create_performance_heatmaps(
+                    metrics,
+                    f"{name} on Multi-Processor",
+                    heatmap_dir
+                )
+                
+                # Log successful heatmap generation
+                logger.info(f"Generated performance heatmaps for {name} scheduler")
+            except Exception as e:
+                logger.error(f"Error generating heatmaps for {name} scheduler: {e}")
+
 
 def compare_algorithms(single_metrics, multi_metrics):
     """
@@ -345,6 +434,11 @@ def compare_algorithms(single_metrics, multi_metrics):
     """
     logger.info("Comparing algorithms")
     
+    # Early return if both metrics are None or empty
+    if not single_metrics and not multi_metrics:
+        logger.warning("No metrics available for comparison. Skipping algorithm comparison.")
+        return
+    
     # Create output directory
     output_dir = f"results/comparison"
     os.makedirs(output_dir, exist_ok=True)
@@ -353,197 +447,137 @@ def compare_algorithms(single_metrics, multi_metrics):
     calculator = MetricsCalculator()
     
     # Compare waiting times across algorithms (single processor)
-    # Check for various possible key names for waiting time
-    avg_waiting_times = {}
-    for name, metrics in single_metrics.items():
-        # Try different possible key names for waiting time
-        waiting_time = None
-        for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
-            if key in metrics:
-                waiting_time = metrics[key]
-                break
+    if single_metrics:
+        # Check for various possible key names for waiting time
+        avg_waiting_times = {}
+        for name, metrics in single_metrics.items():
+            # Try different possible key names for waiting time
+            waiting_time = None
+            for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    waiting_time = metrics[key]
+                    break
+            
+            # If we still don't have a waiting time, try to calculate from completed tasks
+            if waiting_time is None and 'completed_tasks' in metrics:
+                # Check if completed_tasks is iterable (a list)
+                if isinstance(metrics['completed_tasks'], list):
+                    # Only try to iterate if it's actually a list
+                    waiting_times = [task.waiting_time for task in metrics['completed_tasks'] 
+                                    if hasattr(task, 'waiting_time') and task.waiting_time is not None]
+                    waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
+            
+            # Default to 0 if we still don't have a waiting time
+            avg_waiting_times[name] = waiting_time if waiting_time is not None else 0
         
-        # If we still don't have a waiting time, try to calculate from completed tasks
-        if waiting_time is None and 'completed_tasks' in metrics:
-            # Check if completed_tasks is iterable (a list)
-            if isinstance(metrics['completed_tasks'], list):
-                # Only try to iterate if it's actually a list
-                waiting_times = [task.waiting_time for task in metrics['completed_tasks'] 
-                                if hasattr(task, 'waiting_time') and task.waiting_time is not None]
-                waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
-        
-        # Default to 0 if we still don't have a waiting time
-        avg_waiting_times[name] = waiting_time if waiting_time is not None else 0
-    
-    if avg_waiting_times:
-        plot_algorithm_comparison(
-            avg_waiting_times,
-            'waiting_time',
-            'Average Waiting Time Comparison (Single Processor)',
-            'Waiting Time (s)',
-            f"{output_dir}/waiting_time_comparison_single.png"
-        )
+        if avg_waiting_times:
+            plot_algorithm_comparison(
+                avg_waiting_times,
+                'waiting_time',
+                'Average Waiting Time Comparison (Single Processor)',
+                'Waiting Time (s)',
+                f"{output_dir}/waiting_time_comparison_single.png"
+            )
     
     # Compare waiting times across algorithms (multi-processor)
-    multi_waiting_times = {}
-    for name, metrics in multi_metrics.items():
-        # Try different possible key names for waiting time
-        waiting_time = None
-        for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
-            if key in metrics:
-                waiting_time = metrics[key]
-                break
+    if multi_metrics:
+        multi_waiting_times = {}
+        for name, metrics in multi_metrics.items():
+            # Try different possible key names for waiting time
+            waiting_time = None
+            for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    waiting_time = metrics[key]
+                    break
+            
+            # Default to 0 if we still don't have a waiting time
+            multi_waiting_times[name] = waiting_time if waiting_time is not None else 0
         
-        # Default to 0 if we still don't have a waiting time
-        multi_waiting_times[name] = waiting_time if waiting_time is not None else 0
-    
-    if multi_waiting_times:
-        plot_algorithm_comparison(
-            multi_waiting_times,
-            'waiting_time',
-            'Average Waiting Time Comparison (Multi-Processor)',
-            'Waiting Time (s)',
-            f"{output_dir}/waiting_time_comparison_multi.png"
-        )
+        if multi_waiting_times:
+            plot_algorithm_comparison(
+                multi_waiting_times,
+                'waiting_time',
+                'Average Waiting Time Comparison (Multi-Processor)',
+                'Waiting Time (s)',
+                f"{output_dir}/waiting_time_comparison_multi.png"
+            )
     
     # Compare throughput between single and multi-processor
-    for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
-        if scheduler in single_metrics and scheduler in multi_metrics:
-            # Try to extract throughput metrics with different possible key names
-            single_throughput = 0
-            for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
-                if key in single_metrics[scheduler]:
-                    single_throughput = single_metrics[scheduler][key]
-                    break
-            
-            multi_throughput = 0
-            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
-                if key in multi_metrics[scheduler]:
-                    multi_throughput = multi_metrics[scheduler][key]
-                    break
-            
-            if single_throughput > 0 or multi_throughput > 0:
-                plot_processor_comparison(
-                    {'throughput': single_throughput},
-                    {'throughput': multi_throughput},
-                    'throughput',
-                    f'Throughput Comparison - {scheduler}',
-                    'Tasks/second',
-                    f"{output_dir}/throughput_comparison_{scheduler}.png"
-                )
+    if single_metrics and multi_metrics:
+        for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
+            if scheduler in single_metrics and scheduler in multi_metrics:
+                # Try to extract throughput metrics with different possible key names
+                single_throughput = 0
+                for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
+                    if key in single_metrics[scheduler]:
+                        single_throughput = single_metrics[scheduler][key]
+                        break
+                
+                multi_throughput = 0
+                for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                    if key in multi_metrics[scheduler]:
+                        multi_throughput = multi_metrics[scheduler][key]
+                        break
+                
+                if single_throughput > 0 or multi_throughput > 0:
+                    plot_processor_comparison(
+                        {'throughput': single_throughput},
+                        {'throughput': multi_throughput},
+                        'throughput',
+                        f'Throughput Comparison - {scheduler}',
+                        'Tasks/second',
+                        f"{output_dir}/throughput_comparison_{scheduler}.png"
+                    )
     
     # Compare waiting times by priority (single processor vs multi-processor)
-    for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
-        if scheduler in single_metrics and scheduler in multi_metrics:
-            # Try different key names for waiting times by priority
-            single_waiting_by_priority = {}
-            multi_waiting_by_priority = {}
-            
-            # For single processor
-            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
-                if key in single_metrics[scheduler]:
-                    single_waiting_by_priority = single_metrics[scheduler][key]
-                    break
-            
-            # For multi-processor
-            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
-                if key in multi_metrics[scheduler]:
-                    multi_waiting_by_priority = multi_metrics[scheduler][key]
-                    break
-            
-            if single_waiting_by_priority and multi_waiting_by_priority:
-                for priority in ['HIGH', 'MEDIUM', 'LOW']:
-                    if priority in single_waiting_by_priority and priority in multi_waiting_by_priority:
-                        single_time = single_waiting_by_priority[priority]
-                        multi_time = multi_waiting_by_priority[priority]
-                        
-                        plot_processor_comparison(
-                            {priority: single_time},
-                            {priority: multi_time},
-                            priority.lower(),
-                            f'{priority} Priority Waiting Time - {scheduler}',
-                            'Waiting Time (s)',
-                            f"{output_dir}/priority_{priority.lower()}_comparison_{scheduler}.png"
-                        )
+    if single_metrics and multi_metrics:
+        for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
+            if scheduler in single_metrics and scheduler in multi_metrics:
+                # Try different key names for waiting times by priority
+                single_waiting_by_priority = {}
+                multi_waiting_by_priority = {}
+                
+                # For single processor
+                for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
+                    if key in single_metrics[scheduler]:
+                        single_waiting_by_priority = single_metrics[scheduler][key]
+                        break
+                
+                # For multi-processor
+                for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
+                    if key in multi_metrics[scheduler]:
+                        multi_waiting_by_priority = multi_metrics[scheduler][key]
+                        break
+                
+                if single_waiting_by_priority and multi_waiting_by_priority:
+                    for priority in ['HIGH', 'MEDIUM', 'LOW']:
+                        if priority in single_waiting_by_priority and priority in multi_waiting_by_priority:
+                            single_time = single_waiting_by_priority[priority]
+                            multi_time = multi_waiting_by_priority[priority]
+                            
+                            plot_processor_comparison(
+                                {priority: single_time},
+                                {priority: multi_time},
+                                priority.lower(),
+                                f'{priority} Priority Waiting Time - {scheduler}',
+                                'Waiting Time (s)',
+                                f"{output_dir}/priority_{priority.lower()}_comparison_{scheduler}.png"
+                            )
     
-    # Generate comprehensive report
-    try:
-        generate_report(
-            single_metrics,
-            multi_metrics,
-            f"{output_dir}/performance_report.md"
-        )
-    except Exception as e:
-        logger.error(f"Error generating report: {e}")
-    
-    logger.info("Completed algorithm comparison")
-    
-    # Compare throughput between single and multi-processor
-    for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
-        if scheduler in single_metrics and scheduler in multi_metrics:
-            # Try to extract throughput metrics with different possible key names
-            single_throughput = 0
-            for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
-                if key in single_metrics[scheduler]:
-                    single_throughput = single_metrics[scheduler][key]
-                    break
-            
-            multi_throughput = 0
-            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
-                if key in multi_metrics[scheduler]:
-                    multi_throughput = multi_metrics[scheduler][key]
-                    break
-            
-            if single_throughput > 0 or multi_throughput > 0:
-                plot_processor_comparison(
-                    {'throughput': single_throughput},
-                    {'throughput': multi_throughput},
-                    'throughput',
-                    f'Throughput Comparison - {scheduler}',
-                    'Tasks/second',
-                    f"{output_dir}/throughput_comparison_{scheduler}.png"
-                )
-    
-    # Compare waiting times by priority (single processor vs multi-processor)
-    for scheduler in ['FCFS', 'EDF', 'Priority', 'ML-Based']:
-        if scheduler in single_metrics and scheduler in multi_metrics:
-            # Try different key names for waiting times by priority
-            single_waiting_by_priority = {}
-            multi_waiting_by_priority = {}
-            
-            # For single processor
-            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
-                if key in single_metrics[scheduler]:
-                    single_waiting_by_priority = single_metrics[scheduler][key]
-                    break
-            
-            # For multi-processor
-            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
-                if key in multi_metrics[scheduler]:
-                    multi_waiting_by_priority = multi_metrics[scheduler][key]
-                    break
-            
-            if single_waiting_by_priority and multi_waiting_by_priority:
-                for priority in ['HIGH', 'MEDIUM', 'LOW']:
-                    if priority in single_waiting_by_priority and priority in multi_waiting_by_priority:
-                        single_time = single_waiting_by_priority[priority]
-                        multi_time = multi_waiting_by_priority[priority]
-                        
-                        plot_processor_comparison(
-                            {priority: single_time},
-                            {priority: multi_time},
-                            priority.lower(),
-                            f'{priority} Priority Waiting Time - {scheduler}',
-                            'Waiting Time (s)',
-                            f"{output_dir}/priority_{priority.lower()}_comparison_{scheduler}.png"
-                        )
-    
-    # Generate comprehensive report
-    generate_report(
-        single_metrics,
-        multi_metrics,
-        f"{output_dir}/performance_report.md"
-    )
+    # Generate comprehensive report if both metrics are available
+    if single_metrics and multi_metrics:
+        try:
+            generate_report(
+                single_metrics,
+                multi_metrics,
+                f"{output_dir}/performance_report.md"
+            )
+        except Exception as e:
+            logger.error(f"Error generating report: {e}")
+    elif single_metrics:
+        logger.warning("Only single processor metrics available. Skipping full comparison report.")
+    elif multi_metrics:
+        logger.warning("Only multi-processor metrics available. Skipping full comparison report.")
     
     logger.info("Completed algorithm comparison")
 
@@ -662,6 +696,10 @@ def parse_arguments():
 
 def main():
     """Main execution function"""
+    # Initialize logging
+    global logger
+    logger = setup_logging()
+    
     # Parse command line arguments
     args = parse_arguments()
     
@@ -716,20 +754,35 @@ def main():
     
     # Run single processor tests
     if args.single or not (args.single or args.multi):
-        single_results = run_single_processor(tasks, simulation=args.simulation or SIMULATION['enabled'])
-        results['single'] = single_results
+        try:
+            single_results = run_single_processor(tasks, simulation=args.simulation or SIMULATION['enabled'])
+            results['single'] = single_results
+        except Exception as e:
+            logger.error(f"Error running single processor simulation: {e}")
+            results['single'] = None
     
     # Run multi-processor tests
     if args.multi or not (args.single or args.multi):
-        multi_results = run_multi_processor(tasks, simulation=args.simulation or SIMULATION['enabled'])
-        results['multi'] = multi_results
+        try:
+            multi_results = run_multi_processor(tasks, simulation=args.simulation or SIMULATION['enabled'])
+            results['multi'] = multi_results
+        except Exception as e:
+            logger.error(f"Error running multi-processor simulation: {e}")
+            results['multi'] = None
     
     # Compare algorithms
-    if (args.compare or not args.platforms) and 'single' in results and 'multi' in results:
-        compare_algorithms(results['single'], results['multi'])
+    if args.compare or not args.platforms:
+        # Check if we have any results to compare
+        if 'single' in results or 'multi' in results:
+            # Make sure to pass None if a result doesn't exist
+            single_data = results.get('single')
+            multi_data = results.get('multi')
+            compare_algorithms(single_data, multi_data)
+        else:
+            logger.warning("No results available for comparison. Skipping algorithm comparison.")
     
     # Compare platforms
-    if args.platforms:
+    if args.platforms and results:
         compare_platforms(platform_info, results)
     
     logger.info("Task scheduling completed successfully")

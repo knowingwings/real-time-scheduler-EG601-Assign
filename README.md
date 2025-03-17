@@ -1,6 +1,6 @@
 # Real-Time Task Scheduling on Raspberry Pi 3
 
-This project implements and analyses various real-time task scheduling algorithms on a Raspberry Pi 3 using Python. It simulates 50 tasks with varying priorities, service times, and arrival patterns based on a Poisson distribution. Completed for EG6801 - Real-Time Embedded Systems at the University of Glouscestershire.
+This project implements and analyses various real-time task scheduling algorithms on a Raspberry Pi 3 using Python. It simulates 50 tasks with varying priorities, service times, and arrival patterns based on a Poisson distribution. Completed for EG6801 - Real-Time Embedded Systems at the University of Gloucestershire.
 
 ## Project Structure
 
@@ -23,11 +23,6 @@ real-time-scheduler/
 │       ├── __init__.py
 │       ├── visualisation.py    # Plotting and visualisation tools
 │       └── metrics.py          # Performance metrics calculation
-├── test/
-│   ├── __init__.py
-│   ├── test_task_generator.py  # Tests for task generation
-│   ├── test_schedulers.py      # Tests for scheduler implementations
-│   └── test_processors.py      # Tests for processor implementations
 ├── results/
 │   ├── single_processor/       # Single processor results
 │   ├── multi_processor/        # Multi-processor results
