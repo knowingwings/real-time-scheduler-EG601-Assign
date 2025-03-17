@@ -108,13 +108,20 @@ def plot_waiting_times(completed_tasks, scheduler_name, output_path=None):
     # Convert to DataFrame
     task_data = []
     for task in completed_tasks:
-        task_data.append({
-            'id': task.id,
-            'priority': task.priority.name,
-            'waiting_time': task.waiting_time
-        })
+        if task.waiting_time is not None:  # Ensure waiting time is available
+            task_data.append({
+                'id': task.id,
+                'priority': task.priority.name,
+                'waiting_time': task.waiting_time
+            })
     
     df = pd.DataFrame(task_data)
+    
+    if df.empty:
+        plt.title(f"No waiting time data for {scheduler_name}")
+        if output_path:
+            plt.savefig(output_path)
+        return
     
     # Create boxplot grouped by priority
     sns.boxplot(x='priority', y='waiting_time', data=df, 
@@ -149,8 +156,18 @@ def plot_memory_usage(metrics, scheduler_name, output_path=None):
     """
     plt.figure(figsize=(12, 6))
     
-    memory_usage = metrics.get('memory_usage_history')
-    timestamps = metrics.get('timestamp_history')
+    # Check if memory_usage_history exists in metrics
+    memory_usage = metrics.get('memory_usage_history', [])
+    timestamps = metrics.get('timestamp_history', [])
+    
+    # If not found, check nested in metrics history
+    if not memory_usage and 'memory_usage' in metrics:
+        if isinstance(metrics['memory_usage'], list):
+            memory_usage = metrics['memory_usage']
+        
+    if not timestamps and 'timestamp' in metrics:
+        if isinstance(metrics['timestamp'], list):
+            timestamps = metrics['timestamp']
     
     if not memory_usage or not timestamps:
         plt.title(f"No memory data for {scheduler_name}")
@@ -158,15 +175,23 @@ def plot_memory_usage(metrics, scheduler_name, output_path=None):
             plt.savefig(output_path)
         return
     
-    # Convert timestamps to relative time in seconds
-    start_time = timestamps[0]
-    relative_times = [t - start_time for t in timestamps]
+    # Make sure arrays have the same length
+    min_length = min(len(memory_usage), len(timestamps))
+    memory_usage = memory_usage[:min_length]
+    timestamps = timestamps[:min_length]
     
-    plt.plot(relative_times, memory_usage, marker='o', linestyle='-', markersize=3)
-    plt.title(f'Memory Usage Over Time - {scheduler_name}')
-    plt.xlabel('Time (s)')
-    plt.ylabel('Memory Usage (%)')
-    plt.grid(True, linestyle='--', alpha=0.7)
+    # Convert timestamps to relative time in seconds
+    if min_length > 0:
+        start_time = timestamps[0]
+        relative_times = [t - start_time for t in timestamps]
+        
+        plt.plot(relative_times, memory_usage, marker='o', linestyle='-', markersize=3)
+        plt.title(f'Memory Usage Over Time - {scheduler_name}')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Memory Usage (%)')
+        plt.grid(True, linestyle='--', alpha=0.7)
+    else:
+        plt.title(f"Insufficient memory data for {scheduler_name}")
     
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -186,8 +211,18 @@ def plot_queue_length(metrics, scheduler_name, output_path=None):
     """
     plt.figure(figsize=(12, 6))
     
-    queue_lengths = metrics.get('queue_length_history')
-    timestamps = metrics.get('timestamp_history')
+    # Check both possible locations for queue length history
+    queue_lengths = metrics.get('queue_length_history', [])
+    timestamps = metrics.get('timestamp_history', [])
+    
+    # If not found, check if nested in metrics history
+    if not queue_lengths and 'queue_length' in metrics:
+        if isinstance(metrics['queue_length'], list):
+            queue_lengths = metrics['queue_length']
+    
+    if not timestamps and 'timestamp' in metrics:
+        if isinstance(metrics['timestamp'], list):
+            timestamps = metrics['timestamp']
     
     if not queue_lengths or not timestamps:
         plt.title(f"No queue data for {scheduler_name}")
@@ -200,15 +235,118 @@ def plot_queue_length(metrics, scheduler_name, output_path=None):
     queue_lengths = queue_lengths[:min_length]
     timestamps = timestamps[:min_length]
     
-    # Convert timestamps to relative time in seconds
-    start_time = timestamps[0]
-    relative_times = [t - start_time for t in timestamps]
+    if min_length > 0:
+        # Convert timestamps to relative time in seconds
+        start_time = timestamps[0]
+        relative_times = [t - start_time for t in timestamps]
+        
+        plt.plot(relative_times, queue_lengths, marker='o', linestyle='-', markersize=3)
+        plt.title(f'Queue Length Over Time - {scheduler_name}')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Queue Length (tasks)')
+        plt.grid(True, linestyle='--', alpha=0.7)
+    else:
+        plt.title(f"Insufficient queue data for {scheduler_name}")
     
-    plt.plot(relative_times, queue_lengths, marker='o', linestyle='-', markersize=3)
-    plt.title(f'Queue Length Over Time - {scheduler_name}')
-    plt.xlabel('Time (s)')
-    plt.ylabel('Queue Length (tasks)')
-    plt.grid(True, linestyle='--', alpha=0.7)
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.tight_layout()
+        plt.show()
+
+def plot_priority_distribution(metrics, scheduler_name, output_path=None):
+    """
+    Plot distribution of completed tasks by priority
+    
+    Args:
+        metrics: Metrics dictionary from scheduler
+        scheduler_name: Name of the scheduler
+        output_path: Path to save the plot
+    """
+    plt.figure(figsize=(10, 6))
+    
+    # Check if tasks_by_priority exists in metrics
+    tasks_by_priority = metrics.get('tasks_by_priority', {})
+    
+    # If not found, try to calculate from completed tasks
+    if not tasks_by_priority and 'completed_tasks' in metrics:
+        completed_tasks = metrics['completed_tasks']
+        tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+        
+        for task in completed_tasks:
+            priority = task.priority.name if hasattr(task, 'priority') else 'Unknown'
+            if priority in tasks_by_priority:
+                tasks_by_priority[priority] += 1
+    
+    if not tasks_by_priority:
+        plt.title(f"No priority data for {scheduler_name}")
+        if output_path:
+            plt.savefig(output_path)
+        return
+    
+    # Extract priorities and counts
+    priorities = list(tasks_by_priority.keys())
+    counts = list(tasks_by_priority.values())
+    
+    # Create color map
+    colors = [get_priority_color(priority) for priority in priorities]
+    
+    plt.bar(priorities, counts, color=colors, alpha=0.8, edgecolor='black')
+    plt.title(f'Completed Tasks by Priority - {scheduler_name}')
+    plt.xlabel('Priority')
+    plt.ylabel('Number of Tasks')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Add values on top of bars
+    for i, v in enumerate(counts):
+        plt.text(i, v + max(counts) * 0.02, str(v), 
+                ha='center', va='bottom', fontweight='bold')
+    
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.tight_layout()
+        plt.show()
+
+def plot_waiting_times_by_priority(metrics, scheduler_name, output_path=None):
+    """
+    Plot average waiting times by priority
+    
+    Args:
+        metrics: Metrics dictionary from scheduler
+        scheduler_name: Name of the scheduler
+        output_path: Path to save the plot
+    """
+    plt.figure(figsize=(10, 6))
+    
+    # Check if avg_waiting_by_priority exists in metrics
+    waiting_by_priority = metrics.get('avg_waiting_by_priority', {})
+    
+    if not waiting_by_priority:
+        plt.title(f"No waiting time by priority data for {scheduler_name}")
+        if output_path:
+            plt.savefig(output_path)
+        return
+    
+    # Extract priorities and waiting times
+    priorities = list(waiting_by_priority.keys())
+    waiting_times = list(waiting_by_priority.values())
+    
+    # Create color map
+    colors = [get_priority_color(priority) for priority in priorities]
+    
+    plt.bar(priorities, waiting_times, color=colors, alpha=0.8, edgecolor='black')
+    plt.title(f'Average Waiting Time by Priority - {scheduler_name}')
+    plt.xlabel('Priority')
+    plt.ylabel('Average Waiting Time (s)')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Add values on top of bars
+    for i, v in enumerate(waiting_times):
+        plt.text(i, v + max(waiting_times) * 0.02, f'{v:.2f}', 
+                ha='center', va='bottom', fontweight='bold')
     
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -234,16 +372,22 @@ def plot_algorithm_comparison(metrics_dict, metric_name, title, ylabel, output_p
     values = []
     
     for algo_name, metrics in metrics_dict.items():
-        # For metrics that are already scalar values
-        if metric_name in metrics and isinstance(metrics[metric_name], (int, float)):
+        # Handle both direct values and nested metrics
+        if isinstance(metrics, (int, float, np.number)):
+            # If metrics_dict contains direct values
             algorithms.append(algo_name)
-            values.append(metrics[metric_name])
-        # For metrics that are dictionaries (e.g., waiting times by priority)
-        elif metric_name.startswith('avg_') and metric_name[4:] in metrics:
-            # Compute average of the dictionary values
-            avg_value = np.mean(list(metrics[metric_name[4:]].values()))
-            algorithms.append(algo_name)
-            values.append(avg_value)
+            values.append(float(metrics))  # Convert to Python float
+        elif isinstance(metrics, dict):
+            # For metrics that are already scalar values in a dict
+            if metric_name in metrics and isinstance(metrics[metric_name], (int, float, np.number)):
+                algorithms.append(algo_name)
+                values.append(float(metrics[metric_name]))  # Convert to Python float
+            # For metrics that are dictionaries (e.g., waiting times by priority)
+            elif metric_name.startswith('avg_') and metric_name[4:] in metrics:
+                # Compute average of the dictionary values
+                avg_value = np.mean(list(metrics[metric_name[4:]].values()))
+                algorithms.append(algo_name)
+                values.append(float(avg_value))  # Convert to Python float
     
     if not algorithms:
         plt.title(f"No data available for {metric_name}")
@@ -288,16 +432,24 @@ def plot_processor_comparison(single_metrics, multi_metrics, metric_name, title,
     values = []
     
     # Extract metric from single processor
-    if metric_name in single_metrics and isinstance(single_metrics[metric_name], (int, float)):
-        values.append(single_metrics[metric_name])
-    else:
-        values.append(0)
+    single_value = 0
+    if isinstance(single_metrics, (int, float, np.number)):
+        # Direct value
+        single_value = float(single_metrics)
+    elif metric_name in single_metrics and isinstance(single_metrics[metric_name], (int, float, np.number)):
+        # Value in dictionary
+        single_value = float(single_metrics[metric_name])
+    values.append(single_value)
     
     # Extract metric from multi-processor
-    if metric_name in multi_metrics and isinstance(multi_metrics[metric_name], (int, float)):
-        values.append(multi_metrics[metric_name])
-    else:
-        values.append(0)
+    multi_value = 0
+    if isinstance(multi_metrics, (int, float, np.number)):
+        # Direct value
+        multi_value = float(multi_metrics)
+    elif metric_name in multi_metrics and isinstance(multi_metrics[metric_name], (int, float, np.number)):
+        # Value in dictionary
+        multi_value = float(multi_metrics[metric_name])
+    values.append(multi_value)
     
     plt.bar(systems, values, color=['skyblue', 'orange'], alpha=0.8, edgecolor='black')
     plt.title(title)
@@ -356,13 +508,36 @@ def generate_report(single_metrics, multi_metrics, report_path):
         f.write("## Single Processor Results\n\n")
         for algo_name, metrics in single_metrics.items():
             f.write(f"### {algo_name} Scheduler\n\n")
-            f.write(f"- Completed Tasks: {metrics.get('completed_tasks', 0)}\n")
-            f.write(f"- Average Waiting Time: {metrics.get('average_waiting_time', 0):.2f} seconds\n")
+            
+            # Get completed tasks count
+            completed_tasks = 0
+            if 'completed_tasks' in metrics:
+                if isinstance(metrics['completed_tasks'], list):
+                    completed_tasks = len(metrics['completed_tasks'])
+                else:
+                    completed_tasks = metrics['completed_tasks']
+            
+            f.write(f"- Completed Tasks: {completed_tasks}\n")
+            
+            # Get average waiting time using different possible key names
+            avg_waiting_time = 0
+            for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    avg_waiting_time = metrics[key]
+                    break
+            
+            f.write(f"- Average Waiting Time: {avg_waiting_time:.2f} seconds\n")
             
             # Add priority-specific metrics if available
-            if 'waiting_times_by_priority' in metrics:
+            waiting_by_priority = None
+            for key in ['waiting_times_by_priority', 'avg_waiting_by_priority']:
+                if key in metrics:
+                    waiting_by_priority = metrics[key]
+                    break
+            
+            if waiting_by_priority:
                 f.write("- Waiting Times by Priority:\n")
-                for priority, waiting_time in metrics['waiting_times_by_priority'].items():
+                for priority, waiting_time in waiting_by_priority.items():
                     f.write(f"  - {priority}: {waiting_time:.2f} seconds\n")
             
             # Add deadline misses if available (for EDF)
@@ -396,15 +571,68 @@ def generate_report(single_metrics, multi_metrics, report_path):
         
         for algo_name, metrics in multi_metrics.items():
             f.write(f"### {algo_name} Scheduler\n\n")
-            f.write(f"- Total Completed Tasks: {metrics.get('total_completed_tasks', 0)}\n")
-            f.write(f"- Average Waiting Time: {metrics.get('avg_waiting_time', 0):.2f} seconds\n")
-            f.write(f"- System Throughput: {metrics.get('system_throughput', 0):.2f} tasks/second\n")
-            f.write(f"- Load Balance CV: {metrics.get('load_balance_cv', 0):.2f}% (lower is better)\n")
-            f.write(f"- Average CPU Usage: {metrics.get('avg_cpu_usage', 0):.2f}%\n")
-            f.write(f"- Average Memory Usage: {metrics.get('avg_memory_usage', 0):.2f}%\n\n")
             
-            # Add per-processor details if needed
-            # This could be quite verbose, so consider if you want to include it
+            # Get total completed tasks with different possible key names
+            total_completed = 0
+            for key in ['total_completed_tasks', 'completed_tasks']:
+                if key in metrics:
+                    total_completed = metrics[key]
+                    break
+            
+            f.write(f"- Total Completed Tasks: {total_completed}\n")
+            
+            # Get average waiting time with different possible key names
+            avg_waiting_time = 0
+            for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    avg_waiting_time = metrics[key]
+                    break
+            
+            f.write(f"- Average Waiting Time: {avg_waiting_time:.2f} seconds\n")
+            
+            # Get throughput with different possible key names
+            throughput = 0
+            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                if key in metrics:
+                    throughput = metrics[key]
+                    break
+            
+            f.write(f"- System Throughput: {throughput:.2f} tasks/second\n")
+            
+            # Get load balance with different possible key names
+            load_balance = 0
+            for key in ['load_balance_cv', 'load_balance']:
+                if key in metrics:
+                    load_balance = metrics[key]
+                    break
+            
+            f.write(f"- Load Balance CV: {load_balance:.2f}% (lower is better)\n")
+            
+            # Get CPU and memory usage
+            cpu_usage = metrics.get('avg_cpu_usage', 0)
+            memory_usage = metrics.get('avg_memory_usage', 0)
+            
+            f.write(f"- Average CPU Usage: {cpu_usage:.2f}%\n")
+            f.write(f"- Average Memory Usage: {memory_usage:.2f}%\n\n")
+            
+            # Add tasks by priority if available
+            tasks_by_priority = metrics.get('tasks_by_priority')
+            if tasks_by_priority:
+                f.write("- Tasks by Priority:\n")
+                for priority, count in tasks_by_priority.items():
+                    f.write(f"  - {priority}: {count}\n")
+            
+            # Add waiting times by priority if available
+            waiting_by_priority = None
+            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
+                if key in metrics:
+                    waiting_by_priority = metrics[key]
+                    break
+            
+            if waiting_by_priority:
+                f.write("- Average Waiting Time by Priority:\n")
+                for priority, waiting_time in waiting_by_priority.items():
+                    f.write(f"  - {priority}: {waiting_time:.2f} seconds\n")
             
             f.write("\n")
         
@@ -416,7 +644,13 @@ def generate_report(single_metrics, multi_metrics, report_path):
         f.write("| Algorithm | Average Waiting Time (s) |\n")
         f.write("|-----------|-------------------------|\n")
         for algo_name, metrics in single_metrics.items():
-            waiting_time = metrics.get('average_waiting_time', 0)
+            # Get average waiting time with different possible key names
+            waiting_time = 0
+            for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    waiting_time = metrics[key]
+                    break
+            
             f.write(f"| {algo_name} | {waiting_time:.2f} |\n")
         f.write("\n")
         
@@ -430,10 +664,23 @@ def generate_report(single_metrics, multi_metrics, report_path):
             first_single_algo = next(iter(single_metrics))
             first_multi_algo = next(iter(multi_metrics))
             
-            single_throughput = single_metrics[first_single_algo].get('avg_throughput', 0)
-            multi_throughput = multi_metrics[first_multi_algo].get('system_throughput', 0)
+            # Get single processor throughput
+            single_throughput = 0
+            for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
+                if key in single_metrics[first_single_algo]:
+                    single_throughput = single_metrics[first_single_algo][key]
+                    break
+            
+            # Get multi-processor throughput
+            multi_throughput = 0
+            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                if key in multi_metrics[first_multi_algo]:
+                    multi_throughput = multi_metrics[first_multi_algo][key]
+                    break
             
             f.write(f"| Single Processor | {single_throughput:.2f} |\n")
+            
+            processor_count = multi_metrics[first_multi_algo].get('processor_count', 0)
             f.write(f"| Multi-Processor ({processor_count} CPUs) | {multi_throughput:.2f} |\n")
             
             # Calculate speedup
@@ -449,8 +696,16 @@ def generate_report(single_metrics, multi_metrics, report_path):
         
         # Find best algorithm for waiting time
         if single_metrics:
-            best_waiting = min(single_metrics.items(), key=lambda x: x[1].get('average_waiting_time', float('inf')))
-            f.write(f"- **Best for Waiting Time**: {best_waiting[0]} scheduler had the lowest average waiting time.\n")
+            waiting_times = {}
+            for name, metrics in single_metrics.items():
+                for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
+                    if key in metrics:
+                        waiting_times[name] = metrics[key]
+                        break
+            
+            if waiting_times:
+                best_waiting = min(waiting_times.items(), key=lambda x: x[1])
+                f.write(f"- **Best for Waiting Time**: {best_waiting[0]} scheduler had the lowest average waiting time ({best_waiting[1]:.2f}s).\n")
         
         # Compare deadline misses for EDF
         edf_single = single_metrics.get('EDF', {})
@@ -467,15 +722,41 @@ def generate_report(single_metrics, multi_metrics, report_path):
         # General observations
         if multi_metrics:
             first_metrics = next(iter(multi_metrics.values()))
-            speedup = first_metrics.get('system_throughput', 0) / (single_metrics[next(iter(single_metrics))].get('avg_throughput', 1) or 1)
             
-            ideal_speedup = processor_count
-            efficiency = (speedup / ideal_speedup) * 100 if ideal_speedup > 0 else 0
+            # Get throughputs 
+            single_throughput = 0
+            multi_throughput = 0
             
-            f.write(f"- **Parallelization Efficiency**: The multi-processor system achieved {efficiency:.1f}% of ideal speedup.\n")
+            if single_metrics:
+                first_single = next(iter(single_metrics))
+                for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
+                    if key in single_metrics[first_single]:
+                        single_throughput = single_metrics[first_single][key]
+                        break
             
-            if 'load_balance_cv' in first_metrics:
-                load_balance = first_metrics['load_balance_cv']
+            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                if key in first_metrics:
+                    multi_throughput = first_metrics[key]
+                    break
+            
+            if single_throughput > 0:
+                speedup = multi_throughput / single_throughput
+                
+                processor_count = first_metrics.get('processor_count', 0)
+                if processor_count > 0:
+                    ideal_speedup = processor_count
+                    efficiency = (speedup / ideal_speedup) * 100
+                    
+                    f.write(f"- **Parallelization Efficiency**: The multi-processor system achieved {efficiency:.1f}% of ideal speedup.\n")
+            
+            # Check load balance
+            load_balance = 0
+            for key in ['load_balance_cv', 'load_balance']:
+                if key in first_metrics:
+                    load_balance = first_metrics[key]
+                    break
+            
+            if load_balance > 0:
                 if load_balance < 10:
                     f.write("- **Load Balancing**: Excellent load distribution across processors.\n")
                 elif load_balance < 20:

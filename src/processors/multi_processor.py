@@ -55,7 +55,10 @@ class MultiProcessor:
             'total_completed_tasks': 0,
             'avg_waiting_time': 0,
             'processor_load_balance': 0,  # Standard deviation of processor loads
-            'system_throughput': 0        # Tasks per second across all processors
+            'system_throughput': 0,       # Tasks per second across all processors
+            'memory_usage_history': [],   # Track memory usage over time
+            'timestamp_history': [],      # Track timestamps for metrics
+            'queue_length_history': []    # Track queue lengths over time
         }
     
     def add_tasks(self, tasks):
@@ -192,22 +195,27 @@ class MultiProcessor:
             return selected_processor
             
         elif self.strategy == "priority_based":
-            # Distribute by priority
+            # Improved priority-based distribution
             # High priority tasks go to processors 0-1
-            # Medium priority tasks go to processor 2
-            # Low priority tasks go to processor 3
+            # Medium priority tasks go to processors 2-3
+            # Low priority tasks are distributed round-robin
+            
             if task.priority == Priority.HIGH:
                 # Distribute high priority tasks between first two processors
-                if self.next_processor_index < 2:
-                    processor = self.processors[self.next_processor_index]
-                    self.next_processor_index = (self.next_processor_index + 1) % 2
-                else:
-                    processor = self.processors[0]
-                    self.next_processor_index = 1
+                processor_index = 0 if self.next_processor_index % 2 == 0 else 1
+                processor = self.processors[processor_index]
+                
             elif task.priority == Priority.MEDIUM:
-                processor = self.processors[2]
-            else:  # LOW
-                processor = self.processors[3]
+                # Distribute medium priority tasks between middle processors
+                processor_index = 2 if (self.next_processor_index // 2) % 2 == 0 else 3
+                processor = self.processors[min(processor_index, self.processor_count - 1)]
+                
+            else:  # LOW priority
+                # Distribute low priority tasks round-robin among all processors
+                processor = self.processors[self.next_processor_index]
+            
+            # Update next processor index for round-robin distribution
+            self.next_processor_index = (self.next_processor_index + 1) % self.processor_count
             
             return processor
             
@@ -225,8 +233,18 @@ class MultiProcessor:
     def _collect_metrics(self):
         """Collect system-wide metrics"""
         while self.is_running:
-            cpu_percent = psutil.cpu_percent(interval=None)
+            # Collect current timestamp
+            current_time = time.time()
+            self.metrics['timestamp_history'].append(current_time)
+            
+            # Collect memory usage
             memory_percent = psutil.virtual_memory().percent
+            self.metrics['memory_usage_history'].append(memory_percent)
+            
+            # Calculate total queue length across all processors
+            total_queue_length = sum(p.scheduler.task_queue.qsize() for p in self.processors)
+            self.metrics['queue_length_history'].append(total_queue_length)
+            
             # Calculate total completed tasks
             total_completed = sum(len(p.scheduler.completed_tasks) for p in self.processors)
             
@@ -244,14 +262,13 @@ class MultiProcessor:
             load_balance = np.std(queue_sizes) if queue_sizes else 0
             
             # Calculate system throughput (completed tasks per second)
-            time_elapsed = max(p.metrics['timestamp'][-1] - p.metrics['timestamp'][0] 
-                             for p in self.processors if p.metrics['timestamp']) if any(p.metrics['timestamp'] for p in self.processors) else 1
-            
-            system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
+            if len(self.metrics['timestamp_history']) > 1:
+                time_elapsed = self.metrics['timestamp_history'][-1] - self.metrics['timestamp_history'][0]
+                system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
+            else:
+                system_throughput = 0
             
             # Update metrics
-            self.metrics['cpu_usage'] = cpu_percent
-            self.metrics['memory_usage'] = memory_percent
             self.metrics['total_completed_tasks'] = total_completed
             self.metrics['avg_waiting_time'] = avg_waiting_time
             self.metrics['processor_load_balance'] = load_balance
@@ -281,6 +298,17 @@ class MultiProcessor:
         
         avg_waiting_time = sum(all_waiting_times) / len(all_waiting_times) if all_waiting_times else 0
         
+        # Calculate waiting times by priority across all processors
+        waiting_times_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+        for processor in self.processors:
+            for task in processor.scheduler.completed_tasks:
+                if task.waiting_time is not None:
+                    waiting_times_by_priority[task.priority.name].append(task.waiting_time)
+        
+        avg_waiting_by_priority = {}
+        for priority, times in waiting_times_by_priority.items():
+            avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
+        
         # Calculate load balance as coefficient of variation
         completed_per_processor = [metrics['completed_tasks'] for metrics in processor_metrics]
         mean_completed = np.mean(completed_per_processor) if completed_per_processor else 0
@@ -288,31 +316,39 @@ class MultiProcessor:
         cv_completed = (std_completed / mean_completed) * 100 if mean_completed > 0 else 0
         
         # Calculate average CPU and memory usage across processors
-        avg_cpu_usage = np.mean([metrics['avg_cpu_usage'] for metrics in processor_metrics])
-        avg_memory_usage = np.mean([metrics['avg_memory_usage'] for metrics in processor_metrics])
+        avg_cpu_usage = np.mean([metrics['avg_cpu_usage'] for metrics in processor_metrics]) if processor_metrics else 0
+        avg_memory_usage = np.mean(self.metrics['memory_usage_history']) if self.metrics['memory_usage_history'] else 0
         
         # Calculate system throughput
-        start_times = [min(p.metrics['timestamp']) for p in self.processors if p.metrics['timestamp']]
-        end_times = [max(p.metrics['timestamp']) for p in self.processors if p.metrics['timestamp']]
-        
-        if start_times and end_times:
-            overall_start = min(start_times)
-            overall_end = max(end_times)
+        if self.metrics['timestamp_history'] and len(self.metrics['timestamp_history']) > 1:
+            overall_start = self.metrics['timestamp_history'][0]
+            overall_end = self.metrics['timestamp_history'][-1]
             time_elapsed = overall_end - overall_start
             system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
         else:
             system_throughput = 0
+        
+        # Count tasks by priority
+        tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+        for processor in self.processors:
+            for task in processor.scheduler.completed_tasks:
+                tasks_by_priority[task.priority.name] += 1
         
         # Compile system-wide metrics
         system_metrics = {
             'processor_count': self.processor_count,
             'strategy': self.strategy,
             'total_completed_tasks': total_completed,
+            'tasks_by_priority': tasks_by_priority,
             'avg_waiting_time': avg_waiting_time,
+            'avg_waiting_by_priority': avg_waiting_by_priority,
             'load_balance_cv': cv_completed,  # Lower is better (more even distribution)
             'system_throughput': system_throughput,
             'avg_cpu_usage': avg_cpu_usage,
             'avg_memory_usage': avg_memory_usage,
+            'memory_usage_history': self.metrics['memory_usage_history'],
+            'timestamp_history': self.metrics['timestamp_history'],
+            'queue_length_history': self.metrics['queue_length_history'],
             'per_processor_metrics': processor_metrics
         }
         
