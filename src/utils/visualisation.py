@@ -195,6 +195,11 @@ def plot_queue_length(metrics, scheduler_name, output_path=None):
             plt.savefig(output_path)
         return
     
+    # Make sure the arrays have the same length
+    min_length = min(len(queue_lengths), len(timestamps))
+    queue_lengths = queue_lengths[:min_length]
+    timestamps = timestamps[:min_length]
+    
     # Convert timestamps to relative time in seconds
     start_time = timestamps[0]
     relative_times = [t - start_time for t in timestamps]

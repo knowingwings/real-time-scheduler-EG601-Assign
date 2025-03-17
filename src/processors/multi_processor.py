@@ -8,9 +8,11 @@ implementing load balancing and task distribution strategies.
 import threading
 import time
 import logging
+import psutil
 import numpy as np
+from typing import List, Dict, Any, Type, Optional
 from src.processors.single_processor import SingleProcessor
-from src.task_generator import Priority
+from src.task_generator import Task, Priority
 
 class MultiProcessor:
     """
@@ -223,6 +225,8 @@ class MultiProcessor:
     def _collect_metrics(self):
         """Collect system-wide metrics"""
         while self.is_running:
+            cpu_percent = psutil.cpu_percent(interval=None)
+            memory_percent = psutil.virtual_memory().percent
             # Calculate total completed tasks
             total_completed = sum(len(p.scheduler.completed_tasks) for p in self.processors)
             
@@ -246,6 +250,8 @@ class MultiProcessor:
             system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
             
             # Update metrics
+            self.metrics['cpu_usage'] = cpu_percent
+            self.metrics['memory_usage'] = memory_percent
             self.metrics['total_completed_tasks'] = total_completed
             self.metrics['avg_waiting_time'] = avg_waiting_time
             self.metrics['processor_load_balance'] = load_balance
