@@ -21,7 +21,7 @@ class EDFScheduler:
     for real-time systems when the system is not overloaded.
     """
     
-    def __init__(self):
+    def __init__(self, deadline_factor=5.0):
         # Using PriorityQueue for deadline-based ordering
         self.task_queue = PriorityQueue()
         self.current_task = None
@@ -30,6 +30,8 @@ class EDFScheduler:
         self.running = False
         self.current_time = 0
         self.preempted_tasks = []
+        self.deadline_factor = deadline_factor  # Multiplier for deadline calculation
+        self.system_load = 0.0  # Estimated system load
         self.metrics = {
             'queue_length': [],
             'memory_usage': [],
@@ -43,11 +45,28 @@ class EDFScheduler:
         Add a task to the scheduler queue
         
         For tasks without explicit deadlines, we create a soft deadline
-        based on arrival time plus service time.
+        based on arrival time, service time, and system load.
         """
         if task.deadline is None:
-            # Create a soft deadline for tasks that don't have one
-            task.deadline = task.arrival_time + task.service_time * 2
+            # Create a more realistic deadline based on priority and estimated system load
+            priority_factor = 1.0
+            if hasattr(task, 'priority'):
+                # Adjust deadline based on priority (higher priority = lower factor)
+                if task.priority.name == 'HIGH':
+                    priority_factor = 0.7
+                elif task.priority.name == 'MEDIUM':
+                    priority_factor = 1.0
+                else:  # LOW
+                    priority_factor = 1.5
+            
+            # Estimate current queue size for load estimation
+            queue_size = self.task_queue.qsize() + len(self.preempted_tasks)
+            
+            # Adjust deadline factor based on system load
+            adjusted_factor = self.deadline_factor * (1 + (queue_size * 0.1))
+            
+            # Calculate deadline with priority consideration
+            task.deadline = task.arrival_time + (task.service_time * adjusted_factor * priority_factor)
         
         # Add to queue with deadline as priority
         self.task_queue.put((task.deadline, id(task), task))
@@ -74,6 +93,9 @@ class EDFScheduler:
             with self.lock:
                 queue_size = self.task_queue.qsize() + len(self.preempted_tasks)
                 self.metrics['queue_length'].append(queue_size)
+                
+                # Update system load estimate
+                self.system_load = queue_size / 10.0 if queue_size > 0 else 0.0
             
             # Check if we need to resume a preempted task first
             task = None
@@ -110,7 +132,7 @@ class EDFScheduler:
                 self.logger.info(f"Preempting task {self.current_task.id} for task {task.id} with earlier deadline")
                 # Save the remaining execution time of the current task
                 elapsed = time.time() - self.current_task.start_time if not simulation else self.current_time - self.current_task.start_time
-                self.current_task.service_time -= elapsed
+                self.current_task.service_time -= min(elapsed, self.current_task.service_time)  # Avoid negative service time
                 # Add to preempted tasks list
                 self.preempted_tasks.append(self.current_task)
                 self.current_task = None
@@ -119,6 +141,11 @@ class EDFScheduler:
                 # If simulation, we might need to advance time
                 if simulation and self.current_time < task.arrival_time:
                     self.current_time = task.arrival_time
+                
+                # Set waiting time if not already set
+                if task.waiting_time is None:
+                    current_t = time.time() if not simulation else self.current_time
+                    task.waiting_time = max(0, current_t - task.arrival_time)
                 
                 # Set as current task and start execution
                 self.current_task = task
@@ -178,14 +205,35 @@ class EDFScheduler:
     def get_metrics(self):
         """Get execution metrics"""
         with self.lock:
-            # Calculate average waiting time
+            # Calculate average waiting time with error handling
             waiting_times = [task.waiting_time for task in self.completed_tasks 
                             if task.waiting_time is not None]
             avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
             
+            # Calculate average completion time
+            completion_times = [(task.completion_time - task.arrival_time) 
+                               for task in self.completed_tasks 
+                               if task.completion_time is not None]
+            avg_completion_time = sum(completion_times) / len(completion_times) if completion_times else 0
+            
+            # Calculate waiting times by priority
+            waiting_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+            
+            for task in self.completed_tasks:
+                if task.waiting_time is not None and hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in waiting_by_priority:
+                        waiting_by_priority[priority_name].append(task.waiting_time)
+            
+            avg_wait_by_priority = {}
+            for priority, times in waiting_by_priority.items():
+                avg_wait_by_priority[priority] = sum(times) / len(times) if times else 0
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'average_waiting_time': avg_waiting_time,
+                'avg_waiting_time': avg_waiting_time,
+                'avg_completion_time': avg_completion_time,
+                'avg_waiting_by_priority': avg_wait_by_priority,
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],
