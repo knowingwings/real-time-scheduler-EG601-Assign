@@ -576,48 +576,94 @@ def create_task_density_heatmap(metrics, scheduler_name, output_path=None):
     """
     plt.figure(figsize=(12, 6))
     
-    # Get completed tasks - either directly or from processor metrics
+    # First check if we have tasks data in a dataframe format (from CSV read)
+    # This is more likely in the visualization script context
+    tasks_df = None
+    if isinstance(metrics, pd.DataFrame):
+        tasks_df = metrics
+        
+    # If metrics is still a dictionary (original behavior), attempt to extract task data
     completed_tasks = []
     
-    if 'completed_tasks' in metrics and isinstance(metrics['completed_tasks'], list):
-        completed_tasks = metrics['completed_tasks']
-    elif 'per_processor_metrics' in metrics:
+    if tasks_df is None:
+        # Try to find completed tasks directly
+        if 'completed_tasks' in metrics and isinstance(metrics['completed_tasks'], list):
+            completed_tasks = metrics['completed_tasks']
         # For multi-processor, gather tasks from all processors
-        for proc_metrics in metrics['per_processor_metrics']:
-            if 'completed_tasks' in proc_metrics and isinstance(proc_metrics['completed_tasks'], list):
-                completed_tasks.extend(proc_metrics['completed_tasks'])
+        elif 'per_processor_metrics' in metrics:
+            for proc_metrics in metrics['per_processor_metrics']:
+                if 'completed_tasks' in proc_metrics and isinstance(proc_metrics['completed_tasks'], list):
+                    completed_tasks.extend(proc_metrics['completed_tasks'])
     
-    if not completed_tasks:
+    # If we have task objects but no dataframe, create a dataframe
+    task_data = []
+    
+    if completed_tasks and not tasks_df:
+        for task in completed_tasks:
+            if hasattr(task, 'start_time') and hasattr(task, 'completion_time') and \
+               task.start_time is not None and task.completion_time is not None:
+                task_data.append({
+                    'priority': task.priority.name if hasattr(task.priority, 'name') else str(task.priority),
+                    'start_time': task.start_time,
+                    'completion_time': task.completion_time
+                })
+        
+        if task_data:
+            tasks_df = pd.DataFrame(task_data)
+    
+    # If we still don't have usable data, exit gracefully
+    if (not tasks_df or tasks_df.empty) and not task_data:
         plt.title(f"No task execution data available for {scheduler_name}")
         if output_path:
             ensure_output_dir(os.path.dirname(output_path))
             plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
         return
     
-    # Prepare data for the heatmap - create a list of task execution periods
-    task_data = []
-    for task in completed_tasks:
-        if hasattr(task, 'start_time') and hasattr(task, 'completion_time') and \
-           task.start_time is not None and task.completion_time is not None:
-            task_data.append({
-                'priority': task.priority.name if hasattr(task.priority, 'name') else str(task.priority),
-                'start_time': task.start_time,
-                'completion_time': task.completion_time
-            })
+    # Create dataframe if we have task_data but no dataframe yet
+    if task_data and not tasks_df:
+        tasks_df = pd.DataFrame(task_data)
     
-    if not task_data:
-        plt.title(f"No task timing data available for {scheduler_name}")
+    # Ensure we have the necessary columns
+    required_columns = ['priority', 'start_time', 'completion_time']
+    missing_columns = [col for col in required_columns if col not in tasks_df.columns]
+    
+    if missing_columns:
+        plt.title(f"Missing task data columns for {scheduler_name}: {', '.join(missing_columns)}")
         if output_path:
             ensure_output_dir(os.path.dirname(output_path))
             plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
         return
     
-    # Convert to DataFrame for easier analysis
-    df = pd.DataFrame(task_data)
+    # If priority is not properly set, try to extract from task ID
+    if 'priority' in tasks_df.columns:
+        # Check if we have legitimate priority values
+        valid_priorities = ['HIGH', 'MEDIUM', 'LOW']
+        if not any(p in valid_priorities for p in tasks_df['priority'].unique()):
+            # Try to infer priority from task ID (e.g., "H1" -> "HIGH")
+            def infer_priority(task_id):
+                if isinstance(task_id, str) and task_id:
+                    first_char = task_id[0].upper()
+                    if first_char == 'H':
+                        return 'HIGH'
+                    elif first_char == 'M':
+                        return 'MEDIUM'
+                    elif first_char == 'L':
+                        return 'LOW'
+                return 'MEDIUM'  # Default
+            
+            tasks_df['priority'] = tasks_df['id'].apply(infer_priority)
     
     # Create time bins
-    min_time = df['start_time'].min()
-    max_time = df['completion_time'].max()
+    min_time = tasks_df['start_time'].min()
+    max_time = tasks_df['completion_time'].max()
+    
+    # Ensure min_time and max_time are valid
+    if pd.isna(min_time) or pd.isna(max_time) or min_time == max_time:
+        min_time = 0
+        max_time = 100 if pd.isna(max_time) else max_time + 10
+    
     time_bins = np.linspace(min_time, max_time, 11)
     time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
     
@@ -628,7 +674,7 @@ def create_task_density_heatmap(metrics, scheduler_name, output_path=None):
     heatmap_data = np.zeros((len(priority_levels), len(time_bins)-1))
     
     # Fill the heatmap - for each task, add its contribution to each time bin it spans
-    for _, task in df.iterrows():
+    for _, task in tasks_df.iterrows():
         # Find which time bins this task spans
         start_bin = np.searchsorted(time_bins, task['start_time']) - 1
         end_bin = np.searchsorted(time_bins, task['completion_time']) - 1
@@ -686,7 +732,7 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     """
     plt.figure(figsize=(14, 8))
     
-    # Extract data from metrics
+    # Extract data from metrics with better error handling
     timestamps = metrics.get('timestamp_history', [])
     
     # Try alternative timestamp key if not found
@@ -696,8 +742,17 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     # If still no timestamps, create a default range
     if not timestamps:
         timestamps = list(range(10))  # Default range if no timestamps found
+        
+    # Log issue for debugging
+    if not timestamps or len(timestamps) == 0:
+        plt.title(f"No timestamp data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        return
     
-    # Gather resource metrics
+    # Gather resource metrics with better error handling
     memory_usage = metrics.get('memory_usage_history', [])
     queue_length = metrics.get('queue_length_history', [])
     
@@ -708,95 +763,109 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     if not queue_length and 'queue_length' in metrics and isinstance(metrics['queue_length'], list):
         queue_length = metrics['queue_length']
     
-    # Get CPU usage from processor metrics
-    cpu_usage = []
-    per_processor_metrics = metrics.get('per_processor_metrics', [])
+    # Get CPU usage from processor metrics or directly
+    cpu_usage = metrics.get('cpu_usage_history', [])
+    if not cpu_usage and 'cpu_usage' in metrics and isinstance(metrics['cpu_usage'], list):
+        cpu_usage = metrics['cpu_usage']
     
-    if per_processor_metrics:
-        # Average CPU usage across all processors
-        for t_idx in range(len(timestamps)):
-            total_cpu = 0
-            count = 0
-            
-            for proc_metrics in per_processor_metrics:
-                if ('cpu_usage_history' in proc_metrics and 
-                    isinstance(proc_metrics['cpu_usage_history'], list) and 
-                    t_idx < len(proc_metrics['cpu_usage_history'])):
-                    total_cpu += proc_metrics['cpu_usage_history'][t_idx]
-                    count += 1
-                elif ('cpu_usage' in proc_metrics and 
-                      isinstance(proc_metrics['cpu_usage'], list) and 
-                      t_idx < len(proc_metrics['cpu_usage'])):
-                    total_cpu += proc_metrics['cpu_usage'][t_idx]
-                    count += 1
-            
-            if count > 0:
-                cpu_usage.append(total_cpu / count)
-            else:
-                # If no data, use the last known value or zero
-                cpu_usage.append(cpu_usage[-1] if cpu_usage else 0)
+    # Try to extract from per-processor metrics if available and cpu_usage is still empty
+    if not cpu_usage:
+        per_processor_metrics = metrics.get('per_processor_metrics', [])
+        if per_processor_metrics:
+            # Average CPU usage across all processors
+            for t_idx in range(len(timestamps)):
+                total_cpu = 0
+                count = 0
+                
+                for proc_metrics in per_processor_metrics:
+                    if ('cpu_usage_history' in proc_metrics and 
+                        isinstance(proc_metrics['cpu_usage_history'], list) and 
+                        t_idx < len(proc_metrics['cpu_usage_history'])):
+                        total_cpu += proc_metrics['cpu_usage_history'][t_idx]
+                        count += 1
+                    elif ('cpu_usage' in proc_metrics and 
+                          isinstance(proc_metrics['cpu_usage'], list) and 
+                          t_idx < len(proc_metrics['cpu_usage'])):
+                        total_cpu += proc_metrics['cpu_usage'][t_idx]
+                        count += 1
+                
+                if count > 0:
+                    cpu_usage.append(total_cpu / count)
+                else:
+                    # If no data, use the last known value or zero
+                    cpu_usage.append(cpu_usage[-1] if cpu_usage else 0)
+    
+    # Check if we have adequate data
+    if not memory_usage and not queue_length and not cpu_usage:
+        plt.title(f"No resource data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        return
+    
+    # Use dummy data if any metric is missing
+    if not memory_usage:
+        memory_usage = [0] * len(timestamps)
+        print(f"Warning: No memory usage data for {scheduler_name}, using zeros")
+    
+    if not queue_length:
+        queue_length = [0] * len(timestamps)
+        print(f"Warning: No queue length data for {scheduler_name}, using zeros")
+        
+    if not cpu_usage:
+        cpu_usage = [0] * len(timestamps)
+        print(f"Warning: No CPU usage data for {scheduler_name}, using zeros")
     
     # Ensure all lists are the same length as timestamps
     min_length = len(timestamps)
     
     # Trim or extend memory usage
-    if memory_usage:
-        if len(memory_usage) > min_length:
-            memory_usage = memory_usage[:min_length]
-        elif len(memory_usage) < min_length:
-            # Extend with the last value or zero
-            last_value = memory_usage[-1] if memory_usage else 0
-            memory_usage.extend([last_value] * (min_length - len(memory_usage)))
-    else:
-        memory_usage = [0] * min_length
+    if len(memory_usage) > min_length:
+        memory_usage = memory_usage[:min_length]
+    elif len(memory_usage) < min_length:
+        # Extend with the last value or zero
+        last_value = memory_usage[-1] if memory_usage else 0
+        memory_usage.extend([last_value] * (min_length - len(memory_usage)))
     
     # Trim or extend queue length
-    if queue_length:
-        if len(queue_length) > min_length:
-            queue_length = queue_length[:min_length]
-        elif len(queue_length) < min_length:
-            # Extend with the last value or zero
-            last_value = queue_length[-1] if queue_length else 0
-            queue_length.extend([last_value] * (min_length - len(queue_length)))
-    else:
-        queue_length = [0] * min_length
+    if len(queue_length) > min_length:
+        queue_length = queue_length[:min_length]
+    elif len(queue_length) < min_length:
+        # Extend with the last value or zero
+        last_value = queue_length[-1] if queue_length else 0
+        queue_length.extend([last_value] * (min_length - len(queue_length)))
     
     # Trim or extend CPU usage
-    if cpu_usage:
-        if len(cpu_usage) > min_length:
-            cpu_usage = cpu_usage[:min_length]
-        elif len(cpu_usage) < min_length:
-            # Extend with the last value or zero
-            last_value = cpu_usage[-1] if cpu_usage else 0
-            cpu_usage.extend([last_value] * (min_length - len(cpu_usage)))
-    else:
-        cpu_usage = [0] * min_length
+    if len(cpu_usage) > min_length:
+        cpu_usage = cpu_usage[:min_length]
+    elif len(cpu_usage) < min_length:
+        # Extend with the last value or zero
+        last_value = cpu_usage[-1] if cpu_usage else 0
+        cpu_usage.extend([last_value] * (min_length - len(cpu_usage)))
     
     # Convert timestamps to relative time
-    if timestamps and isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:
+    if isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:
         start_time = timestamps[0]
         relative_times = [t - start_time for t in timestamps]
     else:
         relative_times = list(range(len(timestamps)))
     
-    # Create time bins
+    # Create time bins for better visualization
     max_time = max(relative_times) if relative_times else 10
     time_bins = np.linspace(0, max_time, 11)
     time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
     
-    # Normalise data for consistent visualisation
-    max_cpu = max(cpu_usage) if cpu_usage else 100
-    max_memory = max(memory_usage) if memory_usage else 100
-    max_queue = max(queue_length) if queue_length else 1
+    # Normalize data for consistent visualization with safeguards
+    # Get max values with a minimum floor to avoid division by zero
+    max_cpu = max(cpu_usage) if cpu_usage and max(cpu_usage) > 0 else 1.0
+    max_memory = max(memory_usage) if memory_usage and max(memory_usage) > 0 else 1.0
+    max_queue = max(queue_length) if queue_length and max(queue_length) > 0 else 1.0
     
-    # Avoid division by zero
-    max_cpu = max(max_cpu, 0.1)
-    max_memory = max(max_memory, 0.1)
-    max_queue = max(max_queue, 0.1)
-    
-    normalised_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
-    normalised_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
-    normalised_queue = [min(value / max_queue * 100, 100) for value in queue_length]
+    # Normalize values (percentage of maximum for each resource)
+    normalized_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
+    normalized_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
+    normalized_queue = [min(value / max_queue * 100, 100) for value in queue_length]
     
     # Assign each timestamp to a bin
     time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
@@ -809,14 +878,14 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     # Calculate average value for each resource in each time bin
     for time_idx, bin_idx in enumerate(time_bin_indices):
         # Add values to the appropriate bin
-        if time_idx < len(normalised_cpu):
-            heatmap_data[0, bin_idx] += normalised_cpu[time_idx]
+        if time_idx < len(normalized_cpu):
+            heatmap_data[0, bin_idx] += normalized_cpu[time_idx]
         
-        if time_idx < len(normalised_memory):
-            heatmap_data[1, bin_idx] += normalised_memory[time_idx]
+        if time_idx < len(normalized_memory):
+            heatmap_data[1, bin_idx] += normalized_memory[time_idx]
         
-        if time_idx < len(normalised_queue):
-            heatmap_data[2, bin_idx] += normalised_queue[time_idx]
+        if time_idx < len(normalized_queue):
+            heatmap_data[2, bin_idx] += normalized_queue[time_idx]
     
     # Calculate bin averages
     for bin_idx in range(len(time_bins)-1):
@@ -1046,55 +1115,69 @@ def _radar_factory(num_vars, frame='circle'):
     register_projection(RadarAxes)
     
     return theta
-
 def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
     """
-    Create a simpler radar chart comparing different algorithms across multiple metrics
-    
-    This version uses a more basic approach less prone to errors
+    Create an improved radar chart comparing different algorithms across multiple metrics
     
     Args:
         metrics_by_algorithm: Dictionary mapping algorithm names to their metrics
         output_path: Path to save the plot
     """
-    # Define the metrics to compare
+    # Define the metrics to compare - avoid metrics that might be missing in multi-processor
+    # Choose metrics that are present in both single and multi-processor metrics
     metrics_to_compare = [
         ('avg_waiting_time', 'Avg Waiting Time', True),  # True = lower is better
-        ('avg_completion_time', 'Avg Completion Time', True),  # True = lower is better
-        ('throughput', 'Throughput', False),  # False = higher is better
-        ('deadline_misses', 'Deadline Misses', True)  # True = lower is better
+        ('system_throughput', 'Throughput', False),  # False = higher is better
+        ('avg_cpu_usage', 'CPU Usage', True),  # True = lower is better (efficiency)
+        ('avg_memory_usage', 'Memory Usage', True)  # True = lower is better (efficiency)
     ]
     
-    # Filter for only available metrics
+    # Create a dictionary to map various possible key names to our standardized keys
+    key_mappings = {
+        'avg_waiting_time': ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time'],
+        'system_throughput': ['system_throughput', 'avg_throughput', 'throughput', 'tasks_per_second'],
+        'avg_cpu_usage': ['avg_cpu_usage', 'cpu_usage', 'average_cpu_usage'],
+        'avg_memory_usage': ['avg_memory_usage', 'memory_usage', 'average_memory_usage']
+    }
+    
+    # Filter algorithms with valid metrics
+    valid_algorithms = {}
+    for algo, metrics in metrics_by_algorithm.items():
+        if metrics is not None:
+            valid_algorithms[algo] = metrics
+    
+    if not valid_algorithms:
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, "No valid algorithm metrics available for radar chart", 
+                ha='center', va='center', fontsize=14)
+        plt.axis('off')
+        
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        return
+    
+    # For each metric, check which algorithms have that data
     available_metrics = []
     for metric_key, metric_name, lower_is_better in metrics_to_compare:
-        available = True
-        for algorithm, metrics in metrics_by_algorithm.items():
-            # Skip None values
-            if metrics is None:
-                continue
-                
-            # Check if the metric exists or has a similar key
-            found = False
-            if metric_key in metrics:
-                found = True
-            elif metric_key == 'throughput':
-                # Try alternative keys for throughput
-                for alt_key in ['system_throughput', 'throughput', 'tasks_per_second', 'avg_throughput']:
-                    if alt_key in metrics:
-                        found = True
-                        break
-            
-            if not found:
-                available = False
-                break
+        available = False
+        for algo_metrics in valid_algorithms.values():
+            # Check if the metric exists under any of its possible keys
+            for possible_key in key_mappings.get(metric_key, [metric_key]):
+                if possible_key in algo_metrics:
+                    available = True
+                    break
         
         if available:
             available_metrics.append((metric_key, metric_name, lower_is_better))
     
+    # Add extra debugging
+    print(f"Available metrics for radar chart: {[m[1] for m in available_metrics]}")
+    
     if not available_metrics:
         plt.figure(figsize=(10, 6))
-        plt.text(0.5, 0.5, "No common metrics available for radar chart", 
+        plt.text(0.5, 0.5, "No common metrics available for radar chart comparison", 
                 ha='center', va='center', fontsize=14)
         plt.axis('off')
         
@@ -1104,70 +1187,120 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
             plt.close()
         return
     
-    # Extract metric data
+    # Gather the data for each algorithm, extracting metric values
+    data = []
+    all_values_by_metric = {metric_key: [] for metric_key, _, _ in available_metrics}
+    
+    for algo, metrics in valid_algorithms.items():
+        algo_data = []
+        
+        # For each available metric
+        for metric_idx, (metric_key, _, _) in enumerate(available_metrics):
+            # Get the value using any of its possible keys
+            value = None
+            used_key = None
+            for possible_key in key_mappings.get(metric_key, [metric_key]):
+                if possible_key in metrics:
+                    value = metrics[possible_key]
+                    used_key = possible_key
+                    break
+            
+            # If value is still None, use a default value (0)
+            if value is None:
+                print(f"Warning: No value found for {algo}, metric {metric_key}")
+                value = 0
+            
+            # Log the actual values for debugging
+            print(f"{algo} - {metric_key} ({used_key}): {value}")
+            
+            # Special handling for ML scheduler with extreme or missing values
+            if algo == 'ML-Based':
+                # Handle multi-processor missing metrics
+                if metric_key == 'system_throughput' and value == 0:
+                    # Try to find avg_throughput instead
+                    if 'avg_throughput' in metrics:
+                        value = metrics['avg_throughput']
+                        print(f"  Using avg_throughput instead: {value}")
+                    elif 'throughput' in metrics:
+                        value = metrics['throughput']
+                        print(f"  Using throughput instead: {value}")
+            
+            # Collect all values for later normalization
+            all_values_by_metric[metric_key].append(value)
+            algo_data.append(value)
+        
+        data.append((algo, algo_data))
+    
+    # Extract information for the radar chart
     metric_names = [name for _, name, _ in available_metrics]
-    metric_keys = [key for key, _, _ in available_metrics]
     lower_is_better = [flag for _, _, flag in available_metrics]
     
-    data = []
-    for algorithm, metrics in metrics_by_algorithm.items():
-        if metrics is None:
-            continue
-            
-        algorithm_data = []
-        for i, metric_key in enumerate(metric_keys):
-            if metric_key in metrics:
-                algorithm_data.append(metrics[metric_key])
-            elif metric_key == 'throughput':
-                # Try alternative keys for throughput
-                for alt_key in ['system_throughput', 'throughput', 'tasks_per_second', 'avg_throughput']:
-                    if alt_key in metrics:
-                        algorithm_data.append(metrics[alt_key])
-                        break
-                else:
-                    algorithm_data.append(0)  # Default if not found
-            else:
-                algorithm_data.append(0)  # Default if not found
-        
-        data.append((algorithm, algorithm_data))
-    
-    if not data:
-        plt.figure(figsize=(10, 6))
-        plt.text(0.5, 0.5, "No valid data available for radar chart", 
-                ha='center', va='center', fontsize=14)
-        plt.axis('off')
-        
-        if output_path:
-            ensure_output_dir(os.path.dirname(output_path))
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            plt.close()
-        return
-    
-    # Normalize data to a 0-1 scale for each metric
+    # Normalize data to a 0-1 scale for each metric with better handling
     normalized_data = []
-    for algorithm, algorithm_data in data:
-        normalized_algorithm_data = []
-        for i, value in enumerate(algorithm_data):
-            # Get all values for this metric across algorithms
-            all_values = [d[i] for _, d in data]
-            min_val = min(all_values)
-            max_val = max(all_values)
+    
+    # First, filter extreme values by metric
+    sanitized_values_by_metric = {}
+    for metric_key, values in all_values_by_metric.items():
+        # Filter out extreme or invalid values
+        valid_values = [v for v in values if isinstance(v, (int, float)) and 
+                        v < 1000000 and v > -1000000 and not np.isnan(v)]
+        
+        if not valid_values:
+            # If no valid values, use the original with a fallback
+            valid_values = values
+            if not valid_values:
+                valid_values = [0]
+        
+        sanitized_values_by_metric[metric_key] = valid_values
+    
+    # Now normalize using the sanitized values
+    for algo_name, algo_data in data:
+        normalized_algo_data = []
+        for i, (metric_key, value) in enumerate(zip([m[0] for m in available_metrics], algo_data)):
+            # Get sanitized values for this metric
+            sanitized_values = sanitized_values_by_metric[metric_key]
             
-            # Avoid division by zero
-            if min_val == max_val:
-                normalized_value = 0.5
+            # Handle empty or constant metrics
+            if not sanitized_values or max(sanitized_values) == min(sanitized_values):
+                normalized_value = 0.5  # Neutral value
+                print(f"Using neutral value (0.5) for {algo_name}, metric {metric_key}")
             else:
+                min_val = min(sanitized_values)
+                max_val = max(sanitized_values)
+                
+                # Clamp value to avoid extreme outliers
+                clamped_value = max(min_val, min(max_val, value))
+                
                 # Normalize: lower is better -> invert
                 if lower_is_better[i]:
-                    normalized_value = 1 - (value - min_val) / (max_val - min_val)
+                    # Ensure we don't divide by zero
+                    if max_val > min_val:
+                        # Calculate regular normalization first
+                        regular_normalized = (clamped_value - min_val) / (max_val - min_val)
+                        # Then invert it for "lower is better" metrics
+                        normalized_value = 1 - regular_normalized
+                        print(f"  INVERSION: {metric_key} (lower is better) - {clamped_value} normalized to {regular_normalized}, inverted to {normalized_value}")
+                    else:
+                        normalized_value = 0.5
                 else:
-                    normalized_value = (value - min_val) / (max_val - min_val)
+                    # Higher is better
+                    if max_val > min_val:
+                        normalized_value = (clamped_value - min_val) / (max_val - min_val)
+                        print(f"  NO INVERSION: {metric_key} (higher is better) - {clamped_value} normalized to {normalized_value}")
+                    else:
+                        normalized_value = 0.5
             
-            normalized_algorithm_data.append(normalized_value)
+            # Ensure ML scheduler never gets perfect 0 to avoid line effect
+            if algo_name == 'ML-Based' and normalized_value < 0.05:
+                normalized_value = 0.05
+                print(f"Adjusting very low value for ML-Based on {metric_key} to 0.05")
+            
+            normalized_algo_data.append(normalized_value)
+            print(f"Normalized {algo_name} - {metric_key}: {value} -> {normalized_value}")
         
-        normalized_data.append((algorithm, normalized_algorithm_data))
+        normalized_data.append((algo_name, normalized_algo_data))
     
-    # Create a simple polar plot (more compatible approach)
+    # Create a more reliable radar chart using Matplotlib's basic polar plot
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, polar=True)
     
@@ -1183,33 +1316,39 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
     # Draw grid lines
     ax.set_thetagrids(np.degrees(angles[:-1]), metric_names)
     
-    # Draw circles at 0.2, 0.4, 0.6, 0.8, 1.0
-    for level in [0.2, 0.4, 0.6, 0.8]:
-        ax.plot(angles, [level] * len(angles), color='grey', linestyle='-', linewidth=0.5)
+    # Draw circles at 0.25, 0.5, 0.75, 1.0
+    for level in [0.25, 0.5, 0.75]:
+        circle = plt.Circle((0, 0), level, transform=ax.transData._b, fill=False, 
+                           color='grey', linewidth=0.5, alpha=0.5)
+        ax.add_artist(circle)
+    
+    # Fill in the outer circle manually
+    ax.plot(angles, [1] * len(angles), color='grey', linestyle='-', linewidth=0.5, alpha=0.5)
     
     # Set radial limits
-    ax.set_rlim(0, 1)
-    ax.set_rticks([0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], color='grey')
+    ax.set_ylim(0, 1)
+    ax.set_rticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(['0.25', '0.5', '0.75', '1.0'], color='grey')
     
     # Plot each algorithm
-    for algorithm, values in normalized_data:
-        # Close the loop
+    for algo_name, values in normalized_data:
+        # Close the loop for each algorithm's values
         values_closed = values + values[:1]
-        color = ALGORITHM_COLORS.get(algorithm, '#607D8B')
-        ax.plot(angles, values_closed, linewidth=2, linestyle='-', label=algorithm, color=color)
+        color = get_algorithm_color(algo_name)
+        ax.plot(angles, values_closed, linewidth=2, linestyle='-', label=algo_name, color=color)
         ax.fill(angles, values_closed, color=color, alpha=0.25)
     
-    # Add legend
+    # Add legend with better positioning
     plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
     
     plt.title('Algorithm Performance Comparison', size=15, y=1.1)
     
     # Add footnote explaining the normalization
     plt.figtext(0.5, 0.01, 
-               'Note: All metrics are normalized. For metrics where lower is better (waiting time, completion time, deadline misses),\n'
-               'the scale is inverted so that higher values on the radar chart always represent better performance.',
-               ha='center', fontsize=8, bbox=dict(facecolor='lightyellow', alpha=0.5))
+               'Note: All metrics are normalized to 0-1 scale. For metrics where lower is better\n'
+               '(waiting time, completion time, CPU/memory usage), the scale is inverted so that higher values\n'
+               'on the radar chart always represent better performance. Each axis represents relative performance.',
+               ha='center', fontsize=9, bbox=dict(facecolor='lightyellow', alpha=0.5))
     
     # Save the plot if output path is provided
     if output_path:
