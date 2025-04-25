@@ -3,13 +3,13 @@
 Visualisation Tool for Task Scheduling Data
 
 This script processes CSV and JSON data files collected during scheduling simulations
-and generates visualisations for analysis. It can be run after simulations to create
-charts and graphs for the report.
+and generates comprehensive visualisations for analysis. It includes both basic charts
+and advanced visualisations like heatmaps and radar charts.
 
 Usage:
-    python visualise.py --data-dir results/data/TIMESTAMP
-    python visualise.py --data-dir results/data/TIMESTAMP --output-dir results/visualisations
-    python visualise.py --data-dir results/data/TIMESTAMP --scheduler FCFS
+    python visualise.py --data-dir results/data/TIMESTAMP_platform_type
+    python visualise.py --data-dir results/data/TIMESTAMP_platform_type --output-dir results/visualisations
+    python visualise.py --data-dir results/data/TIMESTAMP_platform_type --scheduler FCFS
 """
 
 import os
@@ -22,8 +22,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 from matplotlib.colors import LinearSegmentedColormap
-from pathlib import Path
+from matplotlib.patches import Circle, RegularPolygon
+from matplotlib.path import Path as mpath   
+from matplotlib.projections import register_projection
+from matplotlib.projections.polar import PolarAxes
+from matplotlib.spines import Spine
+from matplotlib.transforms import Affine2D
+import re
 import logging
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -35,29 +42,129 @@ logging.basicConfig(
 )
 logger = logging.getLogger("visualise")
 
+# Constants for visualisation
+PRIORITY_COLORS = {
+    'HIGH': '#FF5252',    # Red
+    'MEDIUM': '#FFD740',  # Amber
+    'LOW': '#69F0AE'      # Green
+}
+
+ALGORITHM_COLORS = {
+    'FCFS': '#2196F3',         # Blue
+    'EDF': '#7B1FA2',          # Purple
+    'Priority': '#FF5722',     # Deep Orange
+    'ML-Based': '#009688'      # Teal
+}
+
 def get_priority_color(priority):
     """Get color based on task priority"""
-    colors = {
-        'HIGH': '#FF5252',    # Red
-        'MEDIUM': '#FFD740',  # Amber
-        'LOW': '#69F0AE'      # Green
-    }
-    return colors.get(priority, '#2196F3')  # Default to blue
+    return PRIORITY_COLORS.get(priority, '#2196F3')  # Default to blue
 
 def get_algorithm_color(algorithm):
     """Get color based on algorithm name"""
-    colors = {
-        'FCFS': '#2196F3',         # Blue
-        'EDF': '#7B1FA2',          # Purple
-        'Priority': '#FF5722',     # Deep Orange
-        'ML-Based': '#009688'      # Teal
-    }
-    return colors.get(algorithm, '#607D8B')  # Default to gray
+    return ALGORITHM_COLORS.get(algorithm, '#607D8B')  # Default to gray
 
 def ensure_output_dir(output_path):
     """Ensure the output directory exists"""
     os.makedirs(output_path, exist_ok=True)
     return output_path
+
+def extract_platform_from_dir(data_dir):
+    """
+    Extract platform type from the directory name
+    
+    Args:
+        data_dir: Path to the data directory
+    
+    Returns:
+        Extracted platform type or None if not found
+    """
+    # Extract the basename of the directory
+    basename = os.path.basename(data_dir)
+    
+    # Try to extract platform using regex
+    # Pattern: timestamp_platform_type
+    match = re.search(r'\d{8}_\d{6}_([\w_]+)', basename)
+    if match:
+        return match.group(1)  # Return the platform type
+    
+    return None
+
+# Function to find task and metrics files with the updated naming convention
+def find_data_files(data_dir, scheduler_name, processor_type='single'):
+    """
+    Find data files with the updated naming convention
+    
+    Args:
+        data_dir: Path to the data directory
+        scheduler_name: Name of the scheduler
+        processor_type: 'single' or 'multi'
+    
+    Returns:
+        Tuple of (tasks_path, metrics_path)
+    """
+    processor_dir = os.path.join(data_dir, f"{processor_type}_processor")
+    
+    # Check if directory exists
+    if not os.path.exists(processor_dir):
+        return None, None
+    
+    # For single processor, files are named simply by scheduler
+    if processor_type == 'single':
+        tasks_path = os.path.join(processor_dir, f"{scheduler_name}_tasks.csv")
+        metrics_path = os.path.join(processor_dir, f"{scheduler_name}_metrics.json")
+        
+        if os.path.exists(tasks_path) and os.path.exists(metrics_path):
+            return tasks_path, metrics_path
+    
+    # For multi-processor, try to find system metrics
+    elif processor_type == 'multi':
+        system_metrics_path = os.path.join(processor_dir, f"{scheduler_name}_system_metrics.json")
+        
+        # For tasks, we might have per-processor files or a combined file
+        all_cpus_path = os.path.join(processor_dir, f"{scheduler_name}_All-CPUs_tasks.csv")
+        
+        if os.path.exists(all_cpus_path) and os.path.exists(system_metrics_path):
+            return all_cpus_path, system_metrics_path
+        
+        # If we don't have a combined file, try to find individual processor files
+        task_files = [f for f in os.listdir(processor_dir) 
+                     if f.startswith(f"{scheduler_name}_CPU-") and f.endswith("_tasks.csv")]
+        
+        if task_files and os.path.exists(system_metrics_path):
+            # Return the first processor's task file for now
+            # The caller will need to handle combining multiple files if needed
+            return os.path.join(processor_dir, task_files[0]), system_metrics_path
+    
+    # Try fallback to old naming convention (with platform name in the filename)
+    platform = extract_platform_from_dir(data_dir)
+    if platform:
+        old_tasks_path = os.path.join(processor_dir, f"{scheduler_name}_{platform.capitalize()}_tasks.csv")
+        old_metrics_path = os.path.join(processor_dir, f"{scheduler_name}_{platform.capitalize()}_metrics.json")
+        
+        if os.path.exists(old_tasks_path) and os.path.exists(old_metrics_path):
+            return old_tasks_path, old_metrics_path
+    
+    # If we still don't have files, try even more general pattern matching
+    tasks_pattern = re.compile(f"{scheduler_name}.*_tasks\.csv")
+    metrics_pattern = re.compile(f"{scheduler_name}.*_metrics\.json")
+    
+    tasks_path = None
+    metrics_path = None
+    
+    for file in os.listdir(processor_dir):
+        if tasks_pattern.match(file):
+            tasks_path = os.path.join(processor_dir, file)
+        if metrics_pattern.match(file):
+            metrics_path = os.path.join(processor_dir, file)
+    
+    if tasks_path and metrics_path:
+        return tasks_path, metrics_path
+    
+    # If no matching files found
+    return None, None
+
+# ========================= BASIC VISUALISATION FUNCTIONS ========================= #
 
 def plot_task_completion(tasks_df, scheduler_name, output_path=None):
     """
@@ -108,6 +215,7 @@ def plot_task_completion(tasks_df, scheduler_name, output_path=None):
     plt.grid(axis='x', linestyle='--', alpha=0.7)
     
     if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -156,6 +264,7 @@ def plot_waiting_times(tasks_df, scheduler_name, output_path=None):
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     
     if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -188,6 +297,7 @@ def plot_memory_usage(timeseries_df, scheduler_name, output_path=None):
     plt.grid(True, linestyle='--', alpha=0.7)
     
     if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -220,96 +330,7 @@ def plot_queue_length(timeseries_df, scheduler_name, output_path=None):
     plt.grid(True, linestyle='--', alpha=0.7)
     
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.tight_layout()
-        plt.show()
-
-def plot_priority_distribution(tasks_df, scheduler_name, output_path=None):
-    """
-    Plot distribution of completed tasks by priority
-    
-    Args:
-        tasks_df: DataFrame containing task data
-        scheduler_name: Name of the scheduler
-        output_path: Path to save the plot
-    """
-    plt.figure(figsize=(10, 6))
-    
-    if tasks_df.empty:
-        plt.title(f"No priority data for {scheduler_name}")
-        if output_path:
-            plt.savefig(output_path)
-        return
-    
-    # Count tasks by priority
-    priority_counts = tasks_df['priority'].value_counts()
-    
-    # Extract priorities and counts
-    priorities = priority_counts.index.tolist()
-    counts = priority_counts.values.tolist()
-    
-    # Create color map
-    colors = [get_priority_color(priority) for priority in priorities]
-    
-    plt.bar(priorities, counts, color=colors, alpha=0.8, edgecolor='black')
-    plt.title(f'Completed Tasks by Priority - {scheduler_name}')
-    plt.xlabel('Priority')
-    plt.ylabel('Number of Tasks')
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    
-    # Add values on top of bars
-    for i, v in enumerate(counts):
-        plt.text(i, v + max(counts) * 0.02, str(v), 
-                ha='center', va='bottom', fontweight='bold')
-    
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.tight_layout()
-        plt.show()
-
-def plot_waiting_times_by_priority(tasks_df, scheduler_name, output_path=None):
-    """
-    Plot average waiting times by priority
-    
-    Args:
-        tasks_df: DataFrame containing task data
-        scheduler_name: Name of the scheduler
-        output_path: Path to save the plot
-    """
-    plt.figure(figsize=(10, 6))
-    
-    if tasks_df.empty:
-        plt.title(f"No waiting time by priority data for {scheduler_name}")
-        if output_path:
-            plt.savefig(output_path)
-        return
-    
-    # Calculate average waiting time by priority
-    avg_waiting = tasks_df.groupby('priority')['waiting_time'].mean()
-    
-    # Extract priorities and waiting times
-    priorities = avg_waiting.index.tolist()
-    waiting_times = avg_waiting.values.tolist()
-    
-    # Create color map
-    colors = [get_priority_color(priority) for priority in priorities]
-    
-    plt.bar(priorities, waiting_times, color=colors, alpha=0.8, edgecolor='black')
-    plt.title(f'Average Waiting Time by Priority - {scheduler_name}')
-    plt.xlabel('Priority')
-    plt.ylabel('Average Waiting Time (s)')
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    
-    # Add values on top of bars
-    for i, v in enumerate(waiting_times):
-        plt.text(i, v + max(waiting_times) * 0.02, f'{v:.2f}', 
-                ha='center', va='bottom', fontweight='bold')
-    
-    if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -332,7 +353,7 @@ def plot_algorithm_comparison(metrics_by_algorithm, metric_name, title, ylabel, 
     algorithms = []
     values = []
     
-    # This function assumes all schedulers now use standardized metric key names:
+    # This function assumes all schedulers now use standardised metric key names:
     # - 'avg_waiting_time' for average waiting time
     # - 'avg_waiting_by_priority' for waiting times by priority
     # - 'tasks_by_priority' for task counts by priority
@@ -341,20 +362,47 @@ def plot_algorithm_comparison(metrics_by_algorithm, metric_name, title, ylabel, 
         # Skip if metrics is None
         if metrics is None:
             continue
-            
-        # Extract the metric value
+        
+        metric_value = None
+        
+        # Handle both direct values and nested dictionaries
         if isinstance(metrics, dict):
-            if metric_name in metrics and metrics[metric_name] is not None:
-                algorithms.append(algo)
-                values.append(metrics[metric_name])
+            # First try the exact metric name
+            if metric_name in metrics:
+                metric_value = metrics[metric_name]
+            
+            # Special handling for waiting time metrics which might have inconsistent naming
+            elif metric_name == 'avg_waiting_time':
+                # Try alternative keys for average waiting time
+                for key in ['average_waiting_time', 'avg_waiting_time', 'mean_waiting_time']:
+                    if key in metrics:
+                        metric_value = metrics[key]
+                        break
+                
+                # If still no value found, try to calculate from waiting_times_by_priority
+                if metric_value is None and 'waiting_times_by_priority' in metrics:
+                    priority_data = metrics['waiting_times_by_priority']
+                    if priority_data and isinstance(priority_data, dict):
+                        # Calculate the overall average
+                        metric_value = sum(priority_data.values()) / len(priority_data)
+                elif metric_value is None and 'avg_waiting_by_priority' in metrics:
+                    priority_data = metrics['avg_waiting_by_priority']
+                    if priority_data and isinstance(priority_data, dict):
+                        # Calculate the overall average
+                        metric_value = sum(priority_data.values()) / len(priority_data)
         elif not isinstance(metrics, dict):
             # Direct value
+            metric_value = metrics
+        
+        # Add to our plotting data if we found a value
+        if metric_value is not None:
             algorithms.append(algo)
-            values.append(metrics)
+            values.append(metric_value)
     
     if not algorithms:
         plt.title(f"No data available for {metric_name}")
         if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
             plt.savefig(output_path)
         return
     
@@ -371,86 +419,922 @@ def plot_algorithm_comparison(metrics_by_algorithm, metric_name, title, ylabel, 
                 ha='center', va='bottom', fontweight='bold')
     
     if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.tight_layout()
         plt.show()
 
-def plot_processor_comparison(single_metrics, multi_metrics, metric_name, title, ylabel, output_path=None):
+# ========================== HEATMAP VISUALISATIONS ========================== #
+
+def create_cpu_utilisation_heatmap(metrics, scheduler_name, output_path=None):
     """
-    Compare metrics between single and multi-processor systems
+    Create a heatmap showing CPU utilisation across time for multiple processors
     
     Args:
-        single_metrics: Dictionary with metrics from single processor
-        multi_metrics: Dictionary with metrics from multi-processor
-        metric_name: Name of the metric to compare
-        title: Plot title
-        ylabel: Y-axis label
-        output_path: Path to save the plot
+        metrics: Metrics dictionary containing CPU utilisation data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
     """
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 8))
     
-    systems = ['Single Processor', 'Multi-Processor']
-    values = [0, 0]  # Default values
+    # Check for required data in the multi-processor metrics
+    per_processor_metrics = metrics.get('per_processor_metrics', [])
     
-    # Handle different key names for the same metrics
-    # For single processor
-    if isinstance(single_metrics, dict):
-        # Try different possible keys for throughput
-        if metric_name == 'avg_throughput':
-            for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
-                if key in single_metrics:
-                    values[0] = single_metrics[key]
-                    break
+    if not per_processor_metrics:
+        plt.title(f"No CPU utilisation data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        return
+    
+    # Create data structure for the heatmap
+    processor_count = len(per_processor_metrics)
+    
+    # Find CPU usage history for each processor
+    cpu_usage_data = []
+    timestamps = []
+    
+    # First try to find timestamps
+    for proc_metrics in per_processor_metrics:
+        if 'timestamp' in proc_metrics and isinstance(proc_metrics['timestamp'], list):
+            timestamps = proc_metrics['timestamp']
+            break
+    
+    # If no timestamps found, check timestamp_history
+    if not timestamps and 'timestamp_history' in metrics:
+        timestamps = metrics['timestamp_history']
+    
+    # Get CPU usage data for each processor
+    for i, proc_metrics in enumerate(per_processor_metrics):
+        cpu_usage = []
+        
+        # Try different possible keys for CPU usage history
+        if 'cpu_usage_history' in proc_metrics:
+            cpu_usage = proc_metrics['cpu_usage_history']
+        elif 'cpu_usage' in proc_metrics and isinstance(proc_metrics['cpu_usage'], list):
+            cpu_usage = proc_metrics['cpu_usage']
+        
+        # Ensure data is the same length as timestamps
+        if cpu_usage:
+            # Trim or extend to match timestamp length
+            if len(cpu_usage) > len(timestamps):
+                cpu_usage = cpu_usage[:len(timestamps)]
+            elif len(cpu_usage) < len(timestamps):
+                # Extend with the last value or zero
+                last_value = cpu_usage[-1] if cpu_usage else 0
+                cpu_usage.extend([last_value] * (len(timestamps) - len(cpu_usage)))
         else:
-            # For other metrics, try the exact key name first
-            if metric_name in single_metrics:
-                values[0] = single_metrics[metric_name]
-    elif isinstance(single_metrics, (int, float)):
-        # Direct value
-        values[0] = single_metrics
+            # If no data, use zeros
+            cpu_usage = [0] * len(timestamps)
+        
+        cpu_usage_data.append(cpu_usage)
     
-    # For multi-processor
-    if isinstance(multi_metrics, dict):
-        # Try different possible keys for throughput
-        if metric_name == 'avg_throughput':
-            for key in ['system_throughput', 'avg_throughput', 'throughput', 'tasks_per_second']:
-                if key in multi_metrics:
-                    values[1] = multi_metrics[key]
-                    break
+    # Convert timestamps to relative time
+    if timestamps and timestamps[0] is not None:
+        # Convert timestamps to relative time if they're absolute timestamps
+        if isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:  # Likely a Unix timestamp
+            start_time = timestamps[0]
+            relative_times = [t - start_time for t in timestamps]
         else:
-            # For other metrics, try the exact key name first
-            if metric_name in multi_metrics:
-                values[1] = multi_metrics[metric_name]
-    elif isinstance(multi_metrics, (int, float)):
-        # Direct value
-        values[1] = multi_metrics
+            relative_times = timestamps
+    else:
+        relative_times = list(range(len(cpu_usage_data[0])))
     
-    plt.bar(systems, values, color=['skyblue', 'orange'], alpha=0.8, edgecolor='black')
-    plt.title(title)
-    plt.ylabel(ylabel)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    # Create time bins for better visualisation
+    max_time = max(relative_times)
+    time_bins = np.linspace(0, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
     
-    # Add values on top of bars
-    for i, v in enumerate(values):
-        plt.text(i, v + max(values) * 0.02, f'{v:.2f}', 
-                ha='center', va='bottom', fontweight='bold')
+    # Assign each timestamp to a bin
+    time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
+    time_bin_indices = np.clip(time_bin_indices, 0, len(time_bins)-2)
     
+    # Calculate average CPU usage for each processor in each time bin
+    heatmap_data = np.zeros((processor_count, len(time_bins)-1))
+    
+    for proc_idx in range(processor_count):
+        cpu_usage = cpu_usage_data[proc_idx]
+        if not cpu_usage:
+            continue
+            
+        for time_idx, bin_idx in enumerate(time_bin_indices):
+            if time_idx < len(cpu_usage):
+                # Add CPU usage to the appropriate bin
+                heatmap_data[proc_idx, bin_idx] += cpu_usage[time_idx]
+        
+        # Calculate averages
+        for bin_idx in range(len(time_bins)-1):
+            # Count how many timestamps fall into this bin
+            count = np.sum(time_bin_indices == bin_idx)
+            if count > 0:
+                heatmap_data[proc_idx, bin_idx] /= count
+    
+    # Create the heatmap
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap="YlOrRd",
+        vmin=0,
+        vmax=100,
+        annot=True,
+        fmt=".1f",
+        linewidths=0.5,
+        cbar_kws={'label': 'CPU Usage (%)'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Processor')
+    plt.title(f'CPU Utilisation Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels (processor names)
+    processor_labels = [f"CPU-{i+1}" for i in range(processor_count)]
+    ax.set_yticklabels(processor_labels, rotation=0)
+    
+    # Set x-tick labels (time bins)
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
     if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
-        plt.tight_layout()
         plt.show()
+
+def create_task_density_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing task density patterns over time by priority level
+    
+    Args:
+        metrics: Metrics dictionary containing task execution data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Get completed tasks - either directly or from processor metrics
+    completed_tasks = []
+    
+    if 'completed_tasks' in metrics and isinstance(metrics['completed_tasks'], list):
+        completed_tasks = metrics['completed_tasks']
+    elif 'per_processor_metrics' in metrics:
+        # For multi-processor, gather tasks from all processors
+        for proc_metrics in metrics['per_processor_metrics']:
+            if 'completed_tasks' in proc_metrics and isinstance(proc_metrics['completed_tasks'], list):
+                completed_tasks.extend(proc_metrics['completed_tasks'])
+    
+    if not completed_tasks:
+        plt.title(f"No task execution data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        return
+    
+    # Prepare data for the heatmap - create a list of task execution periods
+    task_data = []
+    for task in completed_tasks:
+        if hasattr(task, 'start_time') and hasattr(task, 'completion_time') and \
+           task.start_time is not None and task.completion_time is not None:
+            task_data.append({
+                'priority': task.priority.name if hasattr(task.priority, 'name') else str(task.priority),
+                'start_time': task.start_time,
+                'completion_time': task.completion_time
+            })
+    
+    if not task_data:
+        plt.title(f"No task timing data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        return
+    
+    # Convert to DataFrame for easier analysis
+    df = pd.DataFrame(task_data)
+    
+    # Create time bins
+    min_time = df['start_time'].min()
+    max_time = df['completion_time'].max()
+    time_bins = np.linspace(min_time, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
+    
+    # Create priority bins - using the standard priority levels
+    priority_levels = ['HIGH', 'MEDIUM', 'LOW']
+    
+    # Create the heatmap data structure
+    heatmap_data = np.zeros((len(priority_levels), len(time_bins)-1))
+    
+    # Fill the heatmap - for each task, add its contribution to each time bin it spans
+    for _, task in df.iterrows():
+        # Find which time bins this task spans
+        start_bin = np.searchsorted(time_bins, task['start_time']) - 1
+        end_bin = np.searchsorted(time_bins, task['completion_time']) - 1
+        
+        # Clip to valid bin indices
+        start_bin = max(0, min(start_bin, len(time_bins)-2))
+        end_bin = max(0, min(end_bin, len(time_bins)-2))
+        
+        # Add task to all bins it spans
+        priority_idx = priority_levels.index(task['priority']) if task['priority'] in priority_levels else 0
+        
+        for bin_idx in range(start_bin, end_bin + 1):
+            heatmap_data[priority_idx, bin_idx] += 1
+    
+    # Create the heatmap
+    cmap = sns.color_palette("viridis", as_cmap=True)
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap=cmap,
+        annot=True,
+        fmt="g",
+        linewidths=0.5,
+        cbar_kws={'label': 'Number of Active Tasks'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Priority Level')
+    plt.title(f'Task Density Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels
+    ax.set_yticklabels(priority_levels, rotation=0)
+    
+    # Set x-tick labels
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None):
+    """
+    Create a heatmap showing resource bottlenecks (CPU, memory, queue length)
+    
+    Args:
+        metrics: Metrics dictionary containing resource usage data
+        scheduler_name: Name of the scheduler
+        output_path: Base path for saving the heatmap
+    """
+    plt.figure(figsize=(14, 8))
+    
+    # Extract data from metrics
+    timestamps = metrics.get('timestamp_history', [])
+    
+    # Try alternative timestamp key if not found
+    if not timestamps and 'timestamp' in metrics and isinstance(metrics['timestamp'], list):
+        timestamps = metrics['timestamp']
+    
+    # If still no timestamps, create a default range
+    if not timestamps:
+        timestamps = list(range(10))  # Default range if no timestamps found
+    
+    # Gather resource metrics
+    memory_usage = metrics.get('memory_usage_history', [])
+    queue_length = metrics.get('queue_length_history', [])
+    
+    # Try alternative keys
+    if not memory_usage and 'memory_usage' in metrics and isinstance(metrics['memory_usage'], list):
+        memory_usage = metrics['memory_usage']
+    
+    if not queue_length and 'queue_length' in metrics and isinstance(metrics['queue_length'], list):
+        queue_length = metrics['queue_length']
+    
+    # Get CPU usage from processor metrics
+    cpu_usage = []
+    per_processor_metrics = metrics.get('per_processor_metrics', [])
+    
+    if per_processor_metrics:
+        # Average CPU usage across all processors
+        for t_idx in range(len(timestamps)):
+            total_cpu = 0
+            count = 0
+            
+            for proc_metrics in per_processor_metrics:
+                if ('cpu_usage_history' in proc_metrics and 
+                    isinstance(proc_metrics['cpu_usage_history'], list) and 
+                    t_idx < len(proc_metrics['cpu_usage_history'])):
+                    total_cpu += proc_metrics['cpu_usage_history'][t_idx]
+                    count += 1
+                elif ('cpu_usage' in proc_metrics and 
+                      isinstance(proc_metrics['cpu_usage'], list) and 
+                      t_idx < len(proc_metrics['cpu_usage'])):
+                    total_cpu += proc_metrics['cpu_usage'][t_idx]
+                    count += 1
+            
+            if count > 0:
+                cpu_usage.append(total_cpu / count)
+            else:
+                # If no data, use the last known value or zero
+                cpu_usage.append(cpu_usage[-1] if cpu_usage else 0)
+    
+    # Ensure all lists are the same length as timestamps
+    min_length = len(timestamps)
+    
+    # Trim or extend memory usage
+    if memory_usage:
+        if len(memory_usage) > min_length:
+            memory_usage = memory_usage[:min_length]
+        elif len(memory_usage) < min_length:
+            # Extend with the last value or zero
+            last_value = memory_usage[-1] if memory_usage else 0
+            memory_usage.extend([last_value] * (min_length - len(memory_usage)))
+    else:
+        memory_usage = [0] * min_length
+    
+    # Trim or extend queue length
+    if queue_length:
+        if len(queue_length) > min_length:
+            queue_length = queue_length[:min_length]
+        elif len(queue_length) < min_length:
+            # Extend with the last value or zero
+            last_value = queue_length[-1] if queue_length else 0
+            queue_length.extend([last_value] * (min_length - len(queue_length)))
+    else:
+        queue_length = [0] * min_length
+    
+    # Trim or extend CPU usage
+    if cpu_usage:
+        if len(cpu_usage) > min_length:
+            cpu_usage = cpu_usage[:min_length]
+        elif len(cpu_usage) < min_length:
+            # Extend with the last value or zero
+            last_value = cpu_usage[-1] if cpu_usage else 0
+            cpu_usage.extend([last_value] * (min_length - len(cpu_usage)))
+    else:
+        cpu_usage = [0] * min_length
+    
+    # Convert timestamps to relative time
+    if timestamps and isinstance(timestamps[0], (int, float)) and timestamps[0] > 1000000000:
+        start_time = timestamps[0]
+        relative_times = [t - start_time for t in timestamps]
+    else:
+        relative_times = list(range(len(timestamps)))
+    
+    # Create time bins
+    max_time = max(relative_times) if relative_times else 10
+    time_bins = np.linspace(0, max_time, 11)
+    time_bin_labels = [f"{time_bins[i]:.1f}-{time_bins[i+1]:.1f}s" for i in range(len(time_bins)-1)]
+    
+    # Normalise data for consistent visualisation
+    max_cpu = max(cpu_usage) if cpu_usage else 100
+    max_memory = max(memory_usage) if memory_usage else 100
+    max_queue = max(queue_length) if queue_length else 1
+    
+    # Avoid division by zero
+    max_cpu = max(max_cpu, 0.1)
+    max_memory = max(max_memory, 0.1)
+    max_queue = max(max_queue, 0.1)
+    
+    normalised_cpu = [min(value / max_cpu * 100, 100) for value in cpu_usage]
+    normalised_memory = [min(value / max_memory * 100, 100) for value in memory_usage]
+    normalised_queue = [min(value / max_queue * 100, 100) for value in queue_length]
+    
+    # Assign each timestamp to a bin
+    time_bin_indices = np.searchsorted(time_bins, relative_times) - 1
+    time_bin_indices = np.clip(time_bin_indices, 0, len(time_bins)-2)
+    
+    # Create data for the heatmap
+    resources = ['CPU', 'Memory', 'Queue']
+    heatmap_data = np.zeros((len(resources), len(time_bins)-1))
+    
+    # Calculate average value for each resource in each time bin
+    for time_idx, bin_idx in enumerate(time_bin_indices):
+        # Add values to the appropriate bin
+        if time_idx < len(normalised_cpu):
+            heatmap_data[0, bin_idx] += normalised_cpu[time_idx]
+        
+        if time_idx < len(normalised_memory):
+            heatmap_data[1, bin_idx] += normalised_memory[time_idx]
+        
+        if time_idx < len(normalised_queue):
+            heatmap_data[2, bin_idx] += normalised_queue[time_idx]
+    
+    # Calculate bin averages
+    for bin_idx in range(len(time_bins)-1):
+        # Count timestamps in this bin
+        count = np.sum(time_bin_indices == bin_idx)
+        if count > 0:
+            heatmap_data[:, bin_idx] /= count
+    
+    # Create a custom colormap that goes from green to yellow to red
+    cmap = LinearSegmentedColormap.from_list('GYR', [(0, 'green'), (0.5, 'yellow'), (1, 'red')])
+    
+    # Create the heatmap
+    ax = sns.heatmap(
+        heatmap_data,
+        cmap=cmap,
+        vmin=0,
+        vmax=100,
+        annot=True,
+        fmt=".1f",
+        linewidths=0.5,
+        cbar_kws={'label': 'Resource Usage (%)'}
+    )
+    
+    # Set labels
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Resource')
+    plt.title(f'Resource Bottleneck Heatmap - {scheduler_name}')
+    
+    # Set y-tick labels
+    ax.set_yticklabels(resources, rotation=0)
+    
+    # Set x-tick labels
+    ax.set_xticklabels(time_bin_labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+def create_enhanced_gantt_chart(tasks_df, scheduler_name, output_path=None):
+    """
+    Create an enhanced Gantt chart with priority inversion highlighting
+    
+    Args:
+        tasks_df: DataFrame containing task data
+        scheduler_name: Name of the scheduler
+        output_path: Path to save the plot
+    """
+    plt.figure(figsize=(14, 8))
+    
+    if tasks_df.empty:
+        plt.title(f"No task data available for {scheduler_name}")
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        return
+    
+    # Sort tasks by start time and then by priority
+    df = tasks_df.sort_values(['start_time', 'priority'], ascending=[True, True])
+    
+    # Create a mapping of task ID to y-position
+    task_positions = {}
+    current_position = 0
+    
+    # Sort tasks by priority for y-position assignment
+    for task_id in df['id'].unique():
+        task_positions[task_id] = current_position
+        current_position += 1
+    
+    # Create Gantt chart with enhanced visualisation
+    for i, task in df.iterrows():
+        # Get task color based on priority
+        color = PRIORITY_COLORS.get(task['priority'], '#2196F3')
+        
+        # Plot the task execution bar
+        y_pos = task_positions[task['id']]
+        plt.barh(y=y_pos, 
+                width=task['completion_time'] - task['start_time'],
+                left=task['start_time'],
+                color=color,
+                edgecolor='black',
+                alpha=0.7,
+                height=0.5)
+        
+        # Add task ID label
+        plt.text(task['start_time'] + (task['completion_time'] - task['start_time'])/2,
+                y_pos,
+                task['id'],
+                ha='center',
+                va='center',
+                color='black',
+                fontweight='bold')
+        
+        # Mark arrival time
+        plt.scatter(task['arrival_time'], y_pos, marker='|', color='red', s=150)
+        
+        # Mark waiting time with a different color
+        waiting_time = task['start_time'] - task['arrival_time']
+        if waiting_time > 0:
+            plt.barh(y=y_pos, 
+                    width=waiting_time,
+                    left=task['arrival_time'],
+                    color='lightgrey',
+                    edgecolor='black',
+                    alpha=0.5,
+                    height=0.3)
+    
+    # Add deadline markers if available
+    if 'deadline' in df.columns:
+        for i, task in df.iterrows():
+            if pd.notna(task['deadline']):
+                y_pos = task_positions[task['id']]
+                plt.axvline(x=task['deadline'], ymin=(y_pos-0.4)/current_position, 
+                           ymax=(y_pos+0.4)/current_position, color='black', linestyle='--')
+                
+                # Add red highlight for missed deadlines
+                if task['completion_time'] > task['deadline']:
+                    plt.axvspan(task['deadline'], task['completion_time'], 
+                               ymin=(y_pos-0.4)/current_position, 
+                               ymax=(y_pos+0.4)/current_position,
+                               color='red', alpha=0.3)
+    
+    # Add grid lines
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    
+    # Set y-ticks to task IDs
+    plt.yticks(list(task_positions.values()), list(task_positions.keys()))
+    
+    # Set labels and title
+    plt.xlabel('Time (s)')
+    plt.ylabel('Task ID')
+    plt.title(f'Enhanced Task Execution Timeline - {scheduler_name}')
+    
+    # Add legend
+    legend_elements = []
+    for priority, color in PRIORITY_COLORS.items():
+        legend_elements.append(plt.Rectangle((0, 0), 1, 1, color=color, label=f'{priority} Priority'))
+    
+    legend_elements.append(plt.Rectangle((0, 0), 1, 1, color='lightgrey', alpha=0.5, label='Waiting Time'))
+    legend_elements.append(plt.Line2D([0], [0], marker='|', color='red', linestyle='', markersize=10, label='Arrival Time'))
+    
+    if 'deadline' in df.columns:
+        legend_elements.append(plt.Line2D([0], [0], color='black', linestyle='--', label='Deadline'))
+        legend_elements.append(plt.Rectangle((0, 0), 1, 1, color='red', alpha=0.3, label='Deadline Miss'))
+    
+    plt.legend(handles=legend_elements, loc='upper right')
+    
+    plt.tight_layout()
+    
+    # Save the plot if output path is provided
+    if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+# ================= RADAR CHART FOR ALGORITHM COMPARISON ===================== #
+def _radar_factory(num_vars, frame='circle'):
+    """
+    Create a radar chart with `num_vars` axes.
+    
+    Based on matplotlib examples with fixes for compatibility
+    """
+    # Calculate evenly-spaced axis angles
+    theta = np.linspace(0, 2*np.pi, num_vars, endpoint=False)
+    
+    class RadarAxes(PolarAxes):
+        name = 'radar'
+        
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.set_theta_zero_location('N')
+        
+        def fill(self, *args, closed=True, **kwargs):
+            """Override fill so that line is closed by default"""
+            return super().fill(closed=closed, *args, **kwargs)
+        
+        def plot(self, *args, **kwargs):
+            """Override plot so that line is closed by default"""
+            lines = super().plot(*args, **kwargs)
+            for line in lines:
+                self._close_line(line)
+            return lines
+        
+        def _close_line(self, line):
+            x, y = line.get_data()
+            if x[0] != x[-1]:
+                x = np.concatenate((x, [x[0]]))
+                y = np.concatenate((y, [y[0]]))
+                line.set_data(x, y)
+        
+        def set_varlabels(self, labels):
+            self.set_thetagrids(np.degrees(theta), labels)
+        
+        def _gen_axes_patch(self):
+            # The Theta=0, r=1 reference point
+            if frame == 'circle':
+                return Circle((0.5, 0.5), 0.5)
+            elif frame == 'polygon':
+                return RegularPolygon((0.5, 0.5), num_vars, radius=0.5, edgecolor="k")
+            else:
+                raise ValueError("unknown value for 'frame': %s" % frame)
+        
+        def _gen_axes_spines(self):
+            if frame == 'circle':
+                return PolarAxes._gen_axes_spines(self)
+            elif frame == 'polygon':
+                # Use custom polygon spine
+                spine_dicts = {}
+                for i in range(num_vars):
+                    spine = Spine(self, 'polar', 
+                                mpath.Path(np.array([[theta[i], 0.0],
+                                                  [theta[i], 1.0]])))
+                    spine.set_transform(self.transAxes)
+                    spine_dicts[f'polar{i}'] = spine
+                return spine_dicts
+            else:
+                raise ValueError("unknown value for 'frame': %s" % frame)
+    
+    # Register the new projection
+    register_projection(RadarAxes)
+    
+    return theta
+
+def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
+    """
+    Create a simpler radar chart comparing different algorithms across multiple metrics
+    
+    This version uses a more basic approach less prone to errors
+    
+    Args:
+        metrics_by_algorithm: Dictionary mapping algorithm names to their metrics
+        output_path: Path to save the plot
+    """
+    # Define the metrics to compare
+    metrics_to_compare = [
+        ('avg_waiting_time', 'Avg Waiting Time', True),  # True = lower is better
+        ('avg_completion_time', 'Avg Completion Time', True),  # True = lower is better
+        ('throughput', 'Throughput', False),  # False = higher is better
+        ('deadline_misses', 'Deadline Misses', True)  # True = lower is better
+    ]
+    
+    # Filter for only available metrics
+    available_metrics = []
+    for metric_key, metric_name, lower_is_better in metrics_to_compare:
+        available = True
+        for algorithm, metrics in metrics_by_algorithm.items():
+            # Skip None values
+            if metrics is None:
+                continue
+                
+            # Check if the metric exists or has a similar key
+            found = False
+            if metric_key in metrics:
+                found = True
+            elif metric_key == 'throughput':
+                # Try alternative keys for throughput
+                for alt_key in ['system_throughput', 'throughput', 'tasks_per_second', 'avg_throughput']:
+                    if alt_key in metrics:
+                        found = True
+                        break
+            
+            if not found:
+                available = False
+                break
+        
+        if available:
+            available_metrics.append((metric_key, metric_name, lower_is_better))
+    
+    if not available_metrics:
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, "No common metrics available for radar chart", 
+                ha='center', va='center', fontsize=14)
+        plt.axis('off')
+        
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        return
+    
+    # Extract metric data
+    metric_names = [name for _, name, _ in available_metrics]
+    metric_keys = [key for key, _, _ in available_metrics]
+    lower_is_better = [flag for _, _, flag in available_metrics]
+    
+    data = []
+    for algorithm, metrics in metrics_by_algorithm.items():
+        if metrics is None:
+            continue
+            
+        algorithm_data = []
+        for i, metric_key in enumerate(metric_keys):
+            if metric_key in metrics:
+                algorithm_data.append(metrics[metric_key])
+            elif metric_key == 'throughput':
+                # Try alternative keys for throughput
+                for alt_key in ['system_throughput', 'throughput', 'tasks_per_second', 'avg_throughput']:
+                    if alt_key in metrics:
+                        algorithm_data.append(metrics[alt_key])
+                        break
+                else:
+                    algorithm_data.append(0)  # Default if not found
+            else:
+                algorithm_data.append(0)  # Default if not found
+        
+        data.append((algorithm, algorithm_data))
+    
+    if not data:
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, "No valid data available for radar chart", 
+                ha='center', va='center', fontsize=14)
+        plt.axis('off')
+        
+        if output_path:
+            ensure_output_dir(os.path.dirname(output_path))
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        return
+    
+    # Normalize data to a 0-1 scale for each metric
+    normalized_data = []
+    for algorithm, algorithm_data in data:
+        normalized_algorithm_data = []
+        for i, value in enumerate(algorithm_data):
+            # Get all values for this metric across algorithms
+            all_values = [d[i] for _, d in data]
+            min_val = min(all_values)
+            max_val = max(all_values)
+            
+            # Avoid division by zero
+            if min_val == max_val:
+                normalized_value = 0.5
+            else:
+                # Normalize: lower is better -> invert
+                if lower_is_better[i]:
+                    normalized_value = 1 - (value - min_val) / (max_val - min_val)
+                else:
+                    normalized_value = (value - min_val) / (max_val - min_val)
+            
+            normalized_algorithm_data.append(normalized_value)
+        
+        normalized_data.append((algorithm, normalized_algorithm_data))
+    
+    # Create a simple polar plot (more compatible approach)
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, polar=True)
+    
+    # Set the angle of the first axis
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    
+    # Draw the shape of the chart
+    angles = np.linspace(0, 2*np.pi, len(metric_names), endpoint=False).tolist()
+    # Close the loop
+    angles += angles[:1]
+    
+    # Draw grid lines
+    ax.set_thetagrids(np.degrees(angles[:-1]), metric_names)
+    
+    # Draw circles at 0.2, 0.4, 0.6, 0.8, 1.0
+    for level in [0.2, 0.4, 0.6, 0.8]:
+        ax.plot(angles, [level] * len(angles), color='grey', linestyle='-', linewidth=0.5)
+    
+    # Set radial limits
+    ax.set_rlim(0, 1)
+    ax.set_rticks([0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'], color='grey')
+    
+    # Plot each algorithm
+    for algorithm, values in normalized_data:
+        # Close the loop
+        values_closed = values + values[:1]
+        color = ALGORITHM_COLORS.get(algorithm, '#607D8B')
+        ax.plot(angles, values_closed, linewidth=2, linestyle='-', label=algorithm, color=color)
+        ax.fill(angles, values_closed, color=color, alpha=0.25)
+    
+    # Add legend
+    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+    
+    plt.title('Algorithm Performance Comparison', size=15, y=1.1)
+    
+    # Add footnote explaining the normalization
+    plt.figtext(0.5, 0.01, 
+               'Note: All metrics are normalized. For metrics where lower is better (waiting time, completion time, deadline misses),\n'
+               'the scale is inverted so that higher values on the radar chart always represent better performance.',
+               ha='center', fontsize=8, bbox=dict(facecolor='lightyellow', alpha=0.5))
+    
+    # Save the plot if output path is provided
+    if output_path:
+        ensure_output_dir(os.path.dirname(output_path))
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+# Function to generate all visualisations for a single scheduler
+def generate_scheduler_visualisations(tasks_df, metrics, scheduler_name, output_dir):
+    """
+    Generate all visualisations for a specific scheduler
+    
+    Args:
+        tasks_df: DataFrame containing task data
+        metrics: Dictionary containing scheduler metrics
+        scheduler_name: Name of the scheduler
+        output_dir: Directory to save visualisation outputs
+    """
+    # Ensure output directory exists
+    scheduler_dir = os.path.join(output_dir, scheduler_name)
+    ensure_output_dir(scheduler_dir)
+    
+    # 1. Basic visualisations
+    # 1.1 Task completion timeline
+    plot_task_completion(
+        tasks_df, 
+        scheduler_name,
+        os.path.join(scheduler_dir, 'task_completion.png')
+    )
+    
+    # 1.2 Waiting times
+    plot_waiting_times(
+        tasks_df,
+        scheduler_name,
+        os.path.join(scheduler_dir, 'waiting_times.png')
+    )
+    
+    # 1.3 Enhanced Gantt Chart
+    create_enhanced_gantt_chart(
+        tasks_df, 
+        scheduler_name,
+        os.path.join(scheduler_dir, 'enhanced_gantt_chart.png')
+    )
+    
+    # 2. Advanced visualisations
+    # 2.1 Resource Bottleneck Heatmap
+    create_resource_bottleneck_heatmap(
+        metrics,
+        scheduler_name,
+        os.path.join(scheduler_dir, 'resource_bottleneck_heatmap.png')
+    )
+    
+    # 2.2 Task Density Heatmap
+    create_task_density_heatmap(
+        metrics,
+        scheduler_name,
+        os.path.join(scheduler_dir, 'task_density_heatmap.png')
+    )
+    
+    # 2.3 CPU Utilisation Heatmap (for multi-processor)
+    if 'per_processor_metrics' in metrics:
+        create_cpu_utilisation_heatmap(
+            metrics,
+            scheduler_name,
+            os.path.join(scheduler_dir, 'cpu_utilisation_heatmap.png')
+        )
+
+# Function to generate comparison visualisations
+def generate_comparison_visualisations(metrics_by_algorithm, output_dir):
+    """
+    Generate visualisations comparing different algorithms
+    
+    Args:
+        metrics_by_algorithm: Dictionary mapping algorithm names to their metrics
+        output_dir: Directory to save visualisation outputs
+    """
+    # Ensure output directory exists
+    comparison_dir = os.path.join(output_dir, 'comparison')
+    ensure_output_dir(comparison_dir)
+    
+    # 1. Radar Chart Comparison
+    create_radar_chart_comparison(
+        metrics_by_algorithm,
+        os.path.join(comparison_dir, 'radar_chart_comparison.png')
+    )
+    
+    # Extract common metrics for bar chart comparisons
+    common_metrics = [
+        ('avg_waiting_time', 'Average Waiting Time (s)', 'Waiting Time (s)'),
+        ('deadline_misses', 'Deadline Misses', 'Count')
+    ]
+    
+    # 2. Bar chart comparisons for each metric
+    for metric_key, title_suffix, ylabel in common_metrics:
+        # Check if at least one algorithm has this metric
+        has_metric = False
+        for metrics in metrics_by_algorithm.values():
+            if metrics is not None and metric_key in metrics:
+                has_metric = True
+                break
+            # Also check for alternative key names (e.g., average_waiting_time)
+            elif metrics is not None and metric_key == 'avg_waiting_time':
+                for alt_key in ['average_waiting_time', 'mean_waiting_time']:
+                    if alt_key in metrics:
+                        has_metric = True
+                        break
+        
+        if has_metric:
+            plot_algorithm_comparison(
+                metrics_by_algorithm,
+                metric_key,
+                f'Algorithm Comparison - {title_suffix}',
+                ylabel,
+                os.path.join(comparison_dir, f'{metric_key}_comparison.png')
+            )
 
 def generate_report(single_metrics, multi_metrics, report_path):
     """
     Generate a comprehensive report of the scheduling performance
     
     Args:
-        single_metrics: Dictionary with metrics from single processor by scheduler
-        multi_metrics: Dictionary with metrics from multi-processor by scheduler
+        single_metrics: Dictionary mapping scheduler names to metrics for single processor
+        multi_metrics: Dictionary mapping scheduler names to metrics for multi-processor
         report_path: Path to save the report
     """
     report_dir = os.path.dirname(report_path)
@@ -467,15 +1351,28 @@ def generate_report(single_metrics, multi_metrics, report_path):
             f.write(f"### {algo_name} Scheduler\n\n")
             
             # Get completed tasks count
-            completed_tasks = metrics.get('completed_tasks', 0)
+            completed_tasks = 0
+            if 'completed_tasks' in metrics:
+                completed_tasks = metrics['completed_tasks']
+            
             f.write(f"- Completed Tasks: {completed_tasks}\n")
             
-            # Get average waiting time
-            avg_waiting_time = metrics.get('avg_waiting_time', 0)
+            # Get average waiting time using different possible key names
+            avg_waiting_time = 0
+            for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    avg_waiting_time = metrics[key]
+                    break
+            
             f.write(f"- Average Waiting Time: {avg_waiting_time:.2f} seconds\n")
             
             # Add priority-specific metrics if available
-            waiting_by_priority = metrics.get('avg_waiting_by_priority', {})
+            waiting_by_priority = None
+            for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
+                if key in metrics:
+                    waiting_by_priority = metrics[key]
+                    break
+            
             if waiting_by_priority:
                 f.write("- Waiting Times by Priority:\n")
                 for priority, waiting_time in waiting_by_priority.items():
@@ -498,59 +1395,84 @@ def generate_report(single_metrics, multi_metrics, report_path):
             f.write("\n")
         
         # Multi-processor results
-        f.write("## Multi-Processor Results\n\n")
-        f.write("### System Configuration\n\n")
-        
-        # Get processor count and strategy from first available metrics
         if multi_metrics:
+            f.write("## Multi-Processor Results\n\n")
+            f.write(f"### System Configuration\n\n")
+            
+            # Get processor count and strategy from first available metrics
             first_metrics = next(iter(multi_metrics.values()))
             processor_count = first_metrics.get('processor_count', 0)
             strategy = first_metrics.get('strategy', 'Unknown')
             
             f.write(f"- Processor Count: {processor_count}\n")
             f.write(f"- Load Balancing Strategy: {strategy}\n\n")
-        
-        for algo_name, metrics in multi_metrics.items():
-            f.write(f"### {algo_name} Scheduler\n\n")
             
-            # Get total completed tasks
-            total_completed = metrics.get('total_completed_tasks', 0)
-            f.write(f"- Total Completed Tasks: {total_completed}\n")
-            
-            # Get average waiting time
-            avg_waiting_time = metrics.get('avg_waiting_time', 0)
-            f.write(f"- Average Waiting Time: {avg_waiting_time:.2f} seconds\n")
-            
-            # Get throughput
-            throughput = metrics.get('system_throughput', 0)
-            f.write(f"- System Throughput: {throughput:.2f} tasks/second\n")
-            
-            # Get load balance
-            load_balance = metrics.get('load_balance_cv', 0)
-            f.write(f"- Load Balance CV: {load_balance:.2f}% (lower is better)\n")
-            
-            # Get CPU and memory usage
-            cpu_usage = metrics.get('avg_cpu_usage', 0)
-            memory_usage = metrics.get('avg_memory_usage', 0)
-            
-            f.write(f"- Average CPU Usage: {cpu_usage:.2f}%\n")
-            f.write(f"- Average Memory Usage: {memory_usage:.2f}%\n\n")
-            
-            # Add tasks by priority if available
-            tasks_by_priority = metrics.get('tasks_by_priority', {})
-            if tasks_by_priority:
-                f.write("- Tasks by Priority:\n")
-                for priority, count in tasks_by_priority.items():
-                    f.write(f"  - {priority}: {count}\n")
-            
-            # Add waiting times by priority if available
-            waiting_by_priority = metrics.get('avg_waiting_by_priority', {})
-            if waiting_by_priority:
-                f.write("- Average Waiting Time by Priority:\n")
-                for priority, waiting_time in waiting_by_priority.items():
-                    f.write(f"  - {priority}: {waiting_time:.2f} seconds\n")
-            
-            f.write("\n")
+            for algo_name, metrics in multi_metrics.items():
+                f.write(f"### {algo_name} Scheduler\n\n")
+                
+                # Get total completed tasks with different possible key names
+                total_completed = 0
+                for key in ['total_completed_tasks', 'completed_tasks']:
+                    if key in metrics:
+                        total_completed = metrics[key]
+                        break
+                
+                f.write(f"- Total Completed Tasks: {total_completed}\n")
+                
+                # Get average waiting time with different possible key names
+                avg_waiting_time = 0
+                for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                    if key in metrics:
+                        avg_waiting_time = metrics[key]
+                        break
+                
+                f.write(f"- Average Waiting Time: {avg_waiting_time:.2f} seconds\n")
+                
+                # Get throughput with different possible key names
+                throughput = 0
+                for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                    if key in metrics:
+                        throughput = metrics[key]
+                        break
+                
+                f.write(f"- System Throughput: {throughput:.2f} tasks/second\n")
+                
+                # Get load balance with different possible key names
+                load_balance = 0
+                for key in ['load_balance_cv', 'load_balance']:
+                    if key in metrics:
+                        load_balance = metrics[key]
+                        break
+                
+                f.write(f"- Load Balance CV: {load_balance:.2f}% (lower is better)\n")
+                
+                # Get CPU and memory usage
+                cpu_usage = metrics.get('avg_cpu_usage', 0)
+                memory_usage = metrics.get('avg_memory_usage', 0)
+                
+                f.write(f"- Average CPU Usage: {cpu_usage:.2f}%\n")
+                f.write(f"- Average Memory Usage: {memory_usage:.2f}%\n\n")
+                
+                # Add tasks by priority if available
+                tasks_by_priority = metrics.get('tasks_by_priority')
+                if tasks_by_priority:
+                    f.write("- Tasks by Priority:\n")
+                    for priority, count in tasks_by_priority.items():
+                        f.write(f"  - {priority}: {count}\n")
+                
+                # Add waiting times by priority if available
+                waiting_by_priority = None
+                for key in ['avg_waiting_by_priority', 'waiting_times_by_priority']:
+                    if key in metrics:
+                        waiting_by_priority = metrics[key]
+                        break
+                
+                if waiting_by_priority:
+                    f.write("- Average Waiting Time by Priority:\n")
+                    for priority, waiting_time in waiting_by_priority.items():
+                        f.write(f"  - {priority}: {waiting_time:.2f} seconds\n")
+                
+                f.write("\n")
         
         # Comparative analysis
         f.write("## Comparative Analysis\n\n")
@@ -560,7 +1482,13 @@ def generate_report(single_metrics, multi_metrics, report_path):
         f.write("| Algorithm | Average Waiting Time (s) |\n")
         f.write("|-----------|-------------------------|\n")
         for algo_name, metrics in single_metrics.items():
-            waiting_time = metrics.get('avg_waiting_time', 0)
+            # Get average waiting time with different possible key names
+            waiting_time = 0
+            for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                if key in metrics:
+                    waiting_time = metrics[key]
+                    break
+            
             f.write(f"| {algo_name} | {waiting_time:.2f} |\n")
         f.write("\n")
         
@@ -575,10 +1503,18 @@ def generate_report(single_metrics, multi_metrics, report_path):
             first_multi_algo = next(iter(multi_metrics))
             
             # Get single processor throughput
-            single_throughput = single_metrics[first_single_algo].get('avg_throughput', 0)
+            single_throughput = 0
+            for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
+                if key in single_metrics[first_single_algo]:
+                    single_throughput = single_metrics[first_single_algo][key]
+                    break
             
             # Get multi-processor throughput
-            multi_throughput = multi_metrics[first_multi_algo].get('system_throughput', 0)
+            multi_throughput = 0
+            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                if key in multi_metrics[first_multi_algo]:
+                    multi_throughput = multi_metrics[first_multi_algo][key]
+                    break
             
             f.write(f"| Single Processor | {single_throughput:.2f} |\n")
             
@@ -598,8 +1534,12 @@ def generate_report(single_metrics, multi_metrics, report_path):
         
         # Find best algorithm for waiting time
         if single_metrics:
-            waiting_times = {name: metrics.get('avg_waiting_time', float('inf')) 
-                           for name, metrics in single_metrics.items()}
+            waiting_times = {}
+            for name, metrics in single_metrics.items():
+                for key in ['avg_waiting_time', 'average_waiting_time', 'mean_waiting_time']:
+                    if key in metrics:
+                        waiting_times[name] = metrics[key]
+                        break
             
             if waiting_times:
                 best_waiting = min(waiting_times.items(), key=lambda x: x[1])
@@ -607,7 +1547,7 @@ def generate_report(single_metrics, multi_metrics, report_path):
         
         # Compare deadline misses for EDF
         edf_single = single_metrics.get('EDF', {})
-        edf_multi = multi_metrics.get('EDF', {})
+        edf_multi = multi_metrics.get('EDF', {}) if multi_metrics else {}
         
         if 'deadline_misses' in edf_single and 'deadline_misses' in edf_multi:
             single_misses = edf_single['deadline_misses']
@@ -617,7 +1557,7 @@ def generate_report(single_metrics, multi_metrics, report_path):
                 better_system = "Multi-Processor" if single_misses > multi_misses else "Single Processor"
                 f.write(f"- **Deadline Handling**: {better_system} was better at meeting deadlines with the EDF scheduler.\n")
         
-        # General observations
+        # General observations for multi-processor if available
         if multi_metrics:
             first_metrics = next(iter(multi_metrics.values()))
             
@@ -627,9 +1567,15 @@ def generate_report(single_metrics, multi_metrics, report_path):
             
             if single_metrics:
                 first_single = next(iter(single_metrics))
-                single_throughput = single_metrics[first_single].get('avg_throughput', 0)
+                for key in ['avg_throughput', 'throughput', 'tasks_per_second']:
+                    if key in single_metrics[first_single]:
+                        single_throughput = single_metrics[first_single][key]
+                        break
             
-            multi_throughput = first_metrics.get('system_throughput', 0)
+            for key in ['system_throughput', 'throughput', 'tasks_per_second']:
+                if key in first_metrics:
+                    multi_throughput = first_metrics[key]
+                    break
             
             if single_throughput > 0:
                 speedup = multi_throughput / single_throughput
@@ -642,7 +1588,11 @@ def generate_report(single_metrics, multi_metrics, report_path):
                     f.write(f"- **Parallelisation Efficiency**: The multi-processor system achieved {efficiency:.1f}% of ideal speedup.\n")
             
             # Check load balance
-            load_balance = first_metrics.get('load_balance_cv', 0)
+            load_balance = 0
+            for key in ['load_balance_cv', 'load_balance']:
+                if key in first_metrics:
+                    load_balance = first_metrics[key]
+                    break
             
             if load_balance > 0:
                 if load_balance < 10:
@@ -652,10 +1602,13 @@ def generate_report(single_metrics, multi_metrics, report_path):
                 else:
                     f.write("- **Load Balancing**: Poor load distribution, significant processor imbalance.\n")
         
-        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems.")
+        f.write(f"- **Resource Bottlenecks**: The heatmap analysis reveals patterns in resource utilisation that can guide optimisation efforts.\n")
+        
+        f.write("\nThis report provides a quantitative analysis of different scheduling algorithms on both single and multi-processor systems. The accompanying visualisations provide additional insights into task scheduling behavior and resource utilization patterns.")
     
     return report_path
 
+# Main function to process data and generate visualisations
 def process_directory(data_dir, output_dir=None, schedulers=None):
     """
     Process data files in a directory and generate visualisations
@@ -677,13 +1630,10 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
     logger.info(f"Processing data from {data_dir}")
     logger.info(f"Saving visualisations to {output_dir}")
     
-    # Load system information
-    system_info_path = data_dir / "system_info" / "platform_info.json"
-    system_info = {}
-    if system_info_path.exists():
-        with open(system_info_path, 'r') as f:
-            system_info = json.load(f)
-        logger.info(f"Loaded system info: {system_info['system']} {system_info['node']}")
+    # Extract platform type from directory
+    platform = extract_platform_from_dir(str(data_dir))
+    if platform:
+        logger.info(f"Detected platform: {platform}")
     
     # Create subdirectories for visualisations
     vis_single_dir = os.path.join(output_dir, "single_processor")
@@ -701,9 +1651,14 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
     if single_processor_dir.exists():
         # Find all scheduler types from metrics files
         scheduler_types = set()
-        for file_path in single_processor_dir.glob("*_metrics.json"):
-            scheduler_name = file_path.name.split('_')[0]
-            scheduler_types.add(scheduler_name)
+        
+        # Find scheduler types using the pattern SCHEDULER_*.json
+        pattern = re.compile(r'(.+?)_.*\.json')
+        for file_path in os.listdir(single_processor_dir):
+            if file_path.endswith(".json"):
+                match = pattern.match(file_path)
+                if match:
+                    scheduler_types.add(match.group(1))
         
         # Filter by requested schedulers if provided
         if schedulers:
@@ -713,63 +1668,27 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
         
         # Process each scheduler
         for scheduler in scheduler_types:
-            scheduler_dir = os.path.join(vis_single_dir, scheduler)
-            os.makedirs(scheduler_dir, exist_ok=True)
+            # Load data files with updated naming convention support
+            tasks_path, metrics_path = find_data_files(str(data_dir), scheduler, 'single')
             
-            # Load metrics
-            metrics_path = single_processor_dir / f"{scheduler}_Raspberry_Pi_3_metrics.json"
-            if metrics_path.exists():
+            if tasks_path and metrics_path:
+                # Load metrics
                 with open(metrics_path, 'r') as f:
                     metrics = json.load(f)
                 single_metrics[scheduler] = metrics
-            
-            # Load tasks data
-            tasks_path = single_processor_dir / f"{scheduler}_Raspberry_Pi_3_tasks.csv"
-            if tasks_path.exists():
+                
+                # Load tasks data
                 tasks_df = pd.read_csv(tasks_path)
                 
-                # Generate task visualisations
-                plot_task_completion(
-                    tasks_df, 
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "task_completion.png")
-                )
-                
-                plot_waiting_times(
+                # Generate enhanced visualisations
+                generate_scheduler_visualisations(
                     tasks_df,
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "waiting_times.png")
+                    metrics,
+                    scheduler,
+                    vis_single_dir
                 )
-                
-                plot_priority_distribution(
-                    tasks_df,
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "priority_distribution.png")
-                )
-                
-                plot_waiting_times_by_priority(
-                    tasks_df,
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "waiting_times_by_priority.png")
-                )
-            
-            # Load timeseries data
-            timeseries_path = single_processor_dir / f"{scheduler}_Raspberry_Pi_3_timeseries.csv"
-            if timeseries_path.exists():
-                timeseries_df = pd.read_csv(timeseries_path)
-                
-                # Generate timeseries visualisations
-                plot_memory_usage(
-                    timeseries_df,
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "memory_usage.png")
-                )
-                
-                plot_queue_length(
-                    timeseries_df,
-                    f"{scheduler} on Single Processor",
-                    os.path.join(scheduler_dir, "queue_length.png")
-                )
+            else:
+                logger.warning(f"Could not find data files for {scheduler} in single processor mode")
     
     # Process multi-processor data
     multi_processor_dir = data_dir / "multi_processor"
@@ -778,9 +1697,14 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
     if multi_processor_dir.exists():
         # Find all scheduler types from metrics files
         scheduler_types = set()
-        for file_path in multi_processor_dir.glob("*_system_metrics.json"):
-            scheduler_name = file_path.name.split('_')[0]
-            scheduler_types.add(scheduler_name)
+        
+        # Find scheduler types using the pattern SCHEDULER_*.json
+        pattern = re.compile(r'(.+?)_.*\.json')
+        for file_path in os.listdir(multi_processor_dir):
+            if file_path.endswith(".json"):
+                match = pattern.match(file_path)
+                if match:
+                    scheduler_types.add(match.group(1))
         
         # Filter by requested schedulers if provided
         if schedulers:
@@ -790,163 +1714,73 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
         
         # Process each scheduler
         for scheduler in scheduler_types:
-            scheduler_dir = os.path.join(vis_multi_dir, scheduler)
-            os.makedirs(scheduler_dir, exist_ok=True)
+            # Try to find task files from CPUs
+            task_files = [f for f in os.listdir(multi_processor_dir) 
+                        if f.startswith(f"{scheduler}_CPU-") and f.endswith("_tasks.csv")]
             
-            # Load system metrics
-            metrics_path = multi_processor_dir / f"{scheduler}_system_metrics.json"
-            if metrics_path.exists():
-                with open(metrics_path, 'r') as f:
+            # Also look for system metrics file
+            system_metrics_path = os.path.join(multi_processor_dir, f"{scheduler}_system_metrics.json")
+            
+            if os.path.exists(system_metrics_path):
+                # Load system metrics
+                with open(system_metrics_path, 'r') as f:
                     metrics = json.load(f)
                 multi_metrics[scheduler] = metrics
-            
-            # Load tasks data if available (might be per-processor)
-            tasks_pattern = f"{scheduler}_CPU-*_tasks.csv"
-            task_files = list(multi_processor_dir.glob(tasks_pattern))
-            
-            if task_files:
-                # Process each processor's tasks
-                for task_file in task_files:
-                    processor_name = task_file.name.split('_')[1]
-                    processor_dir = os.path.join(scheduler_dir, processor_name)
-                    os.makedirs(processor_dir, exist_ok=True)
-                    
-                    tasks_df = pd.read_csv(task_file)
-                    
-                    # Generate per-processor visualisations
-                    plot_task_completion(
-                        tasks_df, 
-                        f"{scheduler} on {processor_name}",
-                        os.path.join(processor_dir, "task_completion.png")
-                    )
-                    
-                    plot_waiting_times(
-                        tasks_df,
-                        f"{scheduler} on {processor_name}",
-                        os.path.join(processor_dir, "waiting_times.png")
-                    )
-                    
-                    plot_priority_distribution(
-                        tasks_df,
-                        f"{scheduler} on {processor_name}",
-                        os.path.join(processor_dir, "priority_distribution.png")
-                    )
                 
-                # Combine all tasks for a system-wide view
-                all_tasks = []
-                for task_file in task_files:
-                    df = pd.read_csv(task_file)
-                    all_tasks.append(df)
-                
-                if all_tasks:
-                    combined_df = pd.concat(all_tasks)
+                # Process tasks if available
+                if task_files:
+                    # Combine all task files
+                    all_tasks = []
+                    for task_file in task_files:
+                        df = pd.read_csv(os.path.join(multi_processor_dir, task_file))
+                        all_tasks.append(df)
                     
-                    # Generate combined visualisations
-                    plot_task_completion(
-                        combined_df, 
-                        f"{scheduler} on Multi-Processor (All CPUs)",
-                        os.path.join(scheduler_dir, "task_completion_all_cpus.png")
+                    if all_tasks:
+                        combined_df = pd.concat(all_tasks)
+                        
+                        # Generate enhanced visualisations
+                        generate_scheduler_visualisations(
+                            combined_df,
+                            metrics,
+                            scheduler,
+                            vis_multi_dir
+                        )
+                else:
+                    logger.warning(f"No task data found for {scheduler} in multi-processor mode, generating metrics-only visualizations")
+                    generate_scheduler_visualisations(
+                        pd.DataFrame(),  # Empty DataFrame for tasks
+                        metrics,
+                        scheduler,
+                        vis_multi_dir
                     )
-                    
-                    plot_waiting_times(
-                        combined_df,
-                        f"{scheduler} on Multi-Processor (All CPUs)",
-                        os.path.join(scheduler_dir, "waiting_times_all_cpus.png")
-                    )
-                    
-                    plot_priority_distribution(
-                        combined_df,
-                        f"{scheduler} on Multi-Processor (All CPUs)",
-                        os.path.join(scheduler_dir, "priority_distribution.png")
-                    )
-                    
-                    plot_waiting_times_by_priority(
-                        combined_df,
-                        f"{scheduler} on Multi-Processor (All CPUs)",
-                        os.path.join(scheduler_dir, "waiting_times_by_priority.png")
-                    )
-            
-            # Load timeseries data
-            timeseries_path = multi_processor_dir / f"{scheduler}_system_timeseries.csv"
-            if timeseries_path.exists():
-                timeseries_df = pd.read_csv(timeseries_path)
-                
-                # Generate timeseries visualisations
-                plot_memory_usage(
-                    timeseries_df,
-                    f"{scheduler} on Multi-Processor",
-                    os.path.join(scheduler_dir, "memory_usage.png")
-                )
-                
-                plot_queue_length(
-                    timeseries_df,
-                    f"{scheduler} on Multi-Processor",
-                    os.path.join(scheduler_dir, "queue_length.png")
-                )
+            else:
+                logger.warning(f"Could not find metrics file for {scheduler} in multi-processor mode")
     
-    # Generate comparisons if we have both single and multi-processor data
-    if single_metrics and multi_metrics:
-        common_schedulers = set(single_metrics.keys()) & set(multi_metrics.keys())
-        
-        logger.info(f"Generating comparisons for schedulers: {', '.join(common_schedulers)}")
-        
-        # Compare waiting times across algorithms (single processor)
-        waiting_times = {name: metrics.get('avg_waiting_time', 0) 
-                       for name, metrics in single_metrics.items()}
-        
-        if waiting_times:
-            plot_algorithm_comparison(
-                waiting_times,
-                'avg_waiting_time',
-                'Average Waiting Time Comparison (Single Processor)',
-                'Waiting Time (s)',
-                os.path.join(vis_compare_dir, "waiting_time_comparison_single.png")
-            )
-        
-        # Compare waiting times across algorithms (multi-processor)
-        multi_waiting_times = {name: metrics.get('avg_waiting_time', 0)
-                             for name, metrics in multi_metrics.items()}
-        
-        if multi_waiting_times:
-            plot_algorithm_comparison(
-                multi_waiting_times,
-                'avg_waiting_time',
-                'Average Waiting Time Comparison (Multi-Processor)',
-                'Waiting Time (s)',
-                os.path.join(vis_compare_dir, "waiting_time_comparison_multi.png")
-            )
-        
-        # Compare throughput between single and multi-processor for each scheduler
-        for scheduler in common_schedulers:
-            if scheduler in single_metrics and scheduler in multi_metrics:
-                single_throughput = single_metrics[scheduler].get('avg_throughput', 0)
-                multi_throughput = multi_metrics[scheduler].get('system_throughput', 0)
-                
-                if single_throughput > 0 or multi_throughput > 0:
-                    plot_processor_comparison(
-                        {'avg_throughput': single_throughput},
-                        {'system_throughput': multi_throughput},
-                        'avg_throughput',
-                        f'Throughput Comparison - {scheduler}',
-                        'Tasks/second',
-                        os.path.join(vis_compare_dir, f"throughput_comparison_{scheduler}.png")
-                    )
-        
-        # Generate comprehensive report
-        try:
-            generate_report(
-                single_metrics,
-                multi_metrics,
-                os.path.join(vis_compare_dir, "performance_report.md")
-            )
-            logger.info(f"Generated performance report: {os.path.join(vis_compare_dir, 'performance_report.md')}")
-        except Exception as e:
-            logger.error(f"Error generating report: {e}")
+    # Generate comparisons if we have data
+    if single_metrics:
+        # Compare single processor schedulers
+        generate_comparison_visualisations(
+            single_metrics,
+            vis_single_dir
+        )
+    
+    if multi_metrics:
+        # Compare multi-processor schedulers
+        generate_comparison_visualisations(
+            multi_metrics,
+            vis_multi_dir
+        )
+    
+    # Generate comprehensive report
+    if single_metrics or multi_metrics:
+        report_path = os.path.join(output_dir, "performance_report.md")
+        generate_report(single_metrics, multi_metrics, report_path)
+        logger.info(f"Generated performance report: {report_path}")
     
     logger.info("Visualisation generation complete")
 
-def main():
-    """Main function"""
+# If this file is run directly, process command line arguments
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Visualise task scheduling data')
     parser.add_argument('--data-dir', required=True, help='Directory containing data files')
     parser.add_argument('--output-dir', help='Directory to save visualisations')
@@ -956,6 +1790,3 @@ def main():
     args = parser.parse_args()
     
     process_directory(args.data_dir, args.output_dir, args.schedulers)
-
-if __name__ == "__main__":
-    main()

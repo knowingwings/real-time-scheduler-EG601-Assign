@@ -79,23 +79,23 @@ def get_platform_info():
     
     # Determine platform type
     if 'raspberry' in system_info['node'].lower():
-        system_info['type'] = 'embedded'
+        system_info['type'] = 'raspberry_pi_3'
     elif system_info['system'] == 'Darwin':
-        system_info['type'] = 'laptop' if 'MacBook' in platform.node() else 'desktop'
+        system_info['type'] = 'macbook' if 'MacBook' in platform.node() else 'mac_desktop'
     elif system_info['system'] == 'Windows':
-        system_info['type'] = 'laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'desktop'
+        system_info['type'] = 'windows_laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'windows_desktop'
     else:
         system_info['type'] = 'unknown'
     
     return system_info
 
-def run_single_processor(tasks, timestamp, simulation=False):
+def run_single_processor(tasks, data_dir, simulation=False):
     """
     Run scheduling on a single processor
     
     Args:
         tasks: List of Task objects
-        timestamp: Timestamp for saving files
+        data_dir: Directory path to save results
         simulation: Whether to run in simulation mode
         
     Returns:
@@ -135,14 +135,14 @@ def run_single_processor(tasks, timestamp, simulation=False):
         # Store results
         results[name] = metrics
         
-        # Save data instead of visualizing
+        # Save data instead of visualising
         if len(scheduler.completed_tasks) > 0:
             # Save task metrics
             save_task_metrics(
                 scheduler.completed_tasks,
                 name,
                 SINGLE_PROCESSOR['name'],
-                timestamp=timestamp,
+                data_dir,  # Updated to use data_dir
                 processor_type='single'
             )
             
@@ -151,7 +151,7 @@ def run_single_processor(tasks, timestamp, simulation=False):
                 metrics,
                 name,
                 SINGLE_PROCESSOR['name'],
-                timestamp=timestamp,
+                data_dir,  # Updated to use data_dir
                 processor_type='single'
             )
             
@@ -160,7 +160,7 @@ def run_single_processor(tasks, timestamp, simulation=False):
                 metrics,
                 name,
                 SINGLE_PROCESSOR['name'],
-                timestamp=timestamp,
+                data_dir,  # Updated to use data_dir
                 processor_type='single'
             )
             
@@ -188,13 +188,13 @@ def run_single_processor(tasks, timestamp, simulation=False):
     logger.info("Completed all single processor scheduling")
     return results
 
-def run_multi_processor(tasks, timestamp, simulation=False):
+def run_multi_processor(tasks, data_dir, simulation=False):
     """
     Run scheduling on multiple processors
     
     Args:
         tasks: List of Task objects
-        timestamp: Timestamp for saving files
+        data_dir: Directory path to save results
         simulation: Whether to run in simulation mode
         
     Returns:
@@ -246,7 +246,7 @@ def run_multi_processor(tasks, timestamp, simulation=False):
             save_multi_processor_metrics(
                 metrics,
                 name,
-                timestamp=timestamp
+                data_dir  # Updated to use data_dir
             )
             
             # Save time series metrics
@@ -254,7 +254,7 @@ def run_multi_processor(tasks, timestamp, simulation=False):
                 metrics,
                 name,
                 f"System-{MULTI_PROCESSOR['strategy']}",
-                timestamp=timestamp,
+                data_dir,  # Updated to use data_dir
                 processor_type='multi'
             )
             
@@ -267,7 +267,7 @@ def run_multi_processor(tasks, timestamp, simulation=False):
                             proc.scheduler.completed_tasks,
                             name,
                             f"CPU-{i+1}",
-                            timestamp=timestamp,
+                            data_dir,  # Updated to use data_dir
                             processor_type='multi'
                         )
                 
@@ -282,7 +282,7 @@ def run_multi_processor(tasks, timestamp, simulation=False):
                         all_completed_tasks,
                         name,
                         "All-CPUs",
-                        timestamp=timestamp,
+                        data_dir,  # Updated to use data_dir
                         processor_type='multi'
                     )
                     
@@ -295,14 +295,14 @@ def run_multi_processor(tasks, timestamp, simulation=False):
     return results
 
 
-def compare_algorithms(single_metrics, multi_metrics, timestamp):
+def compare_algorithms(single_metrics, multi_metrics, data_dir):
     """
     Compare performance across different algorithms
     
     Args:
         single_metrics: Metrics from single processor
         multi_metrics: Metrics from multi-processor
-        timestamp: Timestamp for saving files
+        data_dir: Directory path to save files
         
     Returns:
         None (saves comparison results)
@@ -459,19 +459,19 @@ def compare_algorithms(single_metrics, multi_metrics, timestamp):
     save_comparison_results(
         comparison_results,
         list(set([*single_metrics.keys(), *multi_metrics.keys()])),
-        timestamp=timestamp
+        data_dir  # Updated to use data_dir
     )
     
     logger.info("Completed algorithm comparison")
 
-def compare_platforms(platform_info, current_metrics, timestamp):
+def compare_platforms(platform_info, current_metrics, data_dir):
     """
     Compare performance across different platforms
     
     Args:
         platform_info: Information about the current platform
         current_metrics: Metrics from the current platform
-        timestamp: Timestamp for saving files
+        data_dir: Directory path to save files
         
     Returns:
         None (saves metrics for later comparison)
@@ -493,7 +493,7 @@ def compare_platforms(platform_info, current_metrics, timestamp):
     
     # We already saved all the metrics through the data_collector functions
     # Just log the platform used
-    with open(f"results/data/{timestamp}/platform_used.txt", 'w') as f:
+    with open(f"{data_dir}/platform_used.txt", 'w') as f:
         f.write(f"Platform: {platform_name}\n")
         f.write(f"Type: {platform_type}\n")
         f.write(f"System: {platform_info['system']}\n")
@@ -511,6 +511,7 @@ def parse_arguments():
     parser.add_argument('--platforms', action='store_true', help='Compare platforms')
     parser.add_argument('--simulation', action='store_true', help='Run in simulation mode')
     parser.add_argument('--speed', type=float, default=SIMULATION['speed_factor'], help='Simulation speed factor')
+    parser.add_argument('--visualise', action='store_true', help='Generate visualisations after simulation')
     
     # Use a safer way to access task count - either through the total across all priorities
     # or falling back to a default value of 50
@@ -532,9 +533,6 @@ def main():
     # Initialise logging
     global logger, timestamp
     logger, timestamp = setup_logging()
-    
-    # Initialize run_timestamp - will be set properly later
-    run_timestamp = timestamp
     
     # Parse command line arguments
     args = parse_arguments()
@@ -574,11 +572,8 @@ def main():
                 TASK_CONFIG['high_priority']['count'] += (args.tasks - current_total)
     
     # Set up output directories and get timestamp if needed
-    run_timestamp = ensure_output_dir()
-    # If we already have a timestamp from logging, use that instead
-    if timestamp:
-        run_timestamp = timestamp
-    save_system_info(timestamp=run_timestamp)
+    timestamp, data_dir = ensure_output_dir()  # Updated to get data_dir
+    save_system_info(data_dir)  # Updated to use data_dir
     
     # Get platform information
     platform_info = get_platform_info()
@@ -595,7 +590,7 @@ def main():
     # Run single processor tests
     if args.single or not (args.single or args.multi):
         try:
-            single_results = run_single_processor(tasks, run_timestamp, simulation=args.simulation or SIMULATION['enabled'])
+            single_results = run_single_processor(tasks, data_dir, simulation=args.simulation or SIMULATION['enabled'])
             results['single'] = single_results
         except Exception as e:
             logger.error(f"Error running single processor simulation: {e}")
@@ -604,7 +599,7 @@ def main():
     # Run multi-processor tests
     if args.multi or not (args.single or args.multi):
         try:
-            multi_results = run_multi_processor(tasks, run_timestamp, simulation=args.simulation or SIMULATION['enabled'])
+            multi_results = run_multi_processor(tasks, data_dir, simulation=args.simulation or SIMULATION['enabled'])
             results['multi'] = multi_results
         except Exception as e:
             logger.error(f"Error running multi-processor simulation: {e}")
@@ -617,7 +612,7 @@ def main():
             # Make sure to pass None if a result doesn't exist
             single_data = results.get('single')
             multi_data = results.get('multi')
-            compare_algorithms(single_data, multi_data, run_timestamp)
+            compare_algorithms(single_data, multi_data, data_dir)  # Updated to use data_dir
         else:
             logger.warning("No results available for comparison. Skipping algorithm comparison.")
     
@@ -631,12 +626,29 @@ def main():
             has_valid_results = True
             
         if has_valid_results:
-            compare_platforms(platform_info, results, run_timestamp)
+            compare_platforms(platform_info, results, data_dir)  # Updated to use data_dir
         else:
             logger.warning("No valid results available for platform comparison. Skipping platform comparison.")
     
-    logger.info(f"Task scheduling completed successfully. Data saved with timestamp: {run_timestamp}")
-    logger.info(f"To generate visualisations, run: python visualise.py --data-dir results/data/{run_timestamp}")
+    logger.info(f"Task scheduling completed successfully. Data saved to: {data_dir}")
+    
+    # Generate visualisations if requested
+    if args.visualise:
+        try:
+            from visualise import process_directory
+            
+            logger.info(f"Generating visualisations from data in: {data_dir}")
+            vis_output_dir = os.path.join(os.path.dirname(data_dir), f"visualisations_{os.path.basename(data_dir)}")
+            process_directory(data_dir, vis_output_dir)
+            logger.info(f"Visualisations saved to: {vis_output_dir}")
+        except ImportError as e:
+            logger.error(f"Error importing visualisation module: {e}")
+            logger.info(f"To generate visualisations, run: python visualise.py --data-dir {data_dir}")
+        except Exception as e:
+            logger.error(f"Error generating visualisations: {e}")
+            logger.info(f"To generate visualisations manually, run: python visualise.py --data-dir {data_dir}")
+    else:
+        logger.info(f"To generate visualisations, run: python visualise.py --data-dir {data_dir}")
 
 if __name__ == "__main__":
     main()

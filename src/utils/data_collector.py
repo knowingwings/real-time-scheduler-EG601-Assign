@@ -2,7 +2,8 @@
 Data Collection Utilities
 
 This module provides functions for saving scheduling metrics to CSV files
-for later analysis and visualization.
+for later analysis and visualisation, with an improved directory structure
+and naming convention.
 """
 
 import os
@@ -36,11 +37,13 @@ def get_platform_info() -> Dict[str, Any]:
     
     # Determine platform type
     if 'raspberry' in system_info['node'].lower():
-        system_info['type'] = 'embedded'
+        system_info['type'] = 'raspberry_pi_3'
     elif system_info['system'] == 'Darwin':
-        system_info['type'] = 'laptop' if 'MacBook' in platform.node() else 'desktop'
+        system_info['type'] = 'macbook' if 'MacBook' in platform.node() else 'mac_desktop'
     elif system_info['system'] == 'Windows':
-        system_info['type'] = 'laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'desktop'
+        system_info['type'] = 'windows_laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'windows_desktop'
+    elif system_info['system'] == 'Linux':
+        system_info['type'] = 'linux_desktop'  # Default for Linux
     else:
         system_info['type'] = 'unknown'
     
@@ -48,18 +51,21 @@ def get_platform_info() -> Dict[str, Any]:
 
 def ensure_output_dir(base_path='results'):
     """
-    Ensure the output directory structure exists
+    Ensure the output directory structure exists with updated naming
     
     Args:
         base_path: Base path for results directory
         
     Returns:
-        Timestamp string used for file naming
+        Tuple of (timestamp string, directory path) used for file naming
     """
+    # Get timestamp and platform info
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    platform_info = get_platform_info()
+    platform_type = platform_info['type']
     
-    # Create base directories
-    data_dir = f"{base_path}/data/{timestamp}"
+    # Create directory with timestamp and platform type
+    data_dir = f"{base_path}/data/{timestamp}_{platform_type}"
     os.makedirs(data_dir, exist_ok=True)
     
     # Create subdirectories
@@ -72,24 +78,20 @@ def ensure_output_dir(base_path='results'):
     for directory in directories:
         os.makedirs(directory, exist_ok=True)
     
-    logger.info(f"Created output directories for timestamp: {timestamp}")
-    return timestamp
+    logger.info(f"Created output directories for timestamp: {timestamp}_{platform_type}")
+    return timestamp, data_dir
 
-def save_system_info(base_path='results', timestamp=None):
+def save_system_info(data_dir):
     """
     Save system information to a JSON file
     
     Args:
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save the system info
     """
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     system_info = get_platform_info()
     
     # Create the file path
-    file_path = f"{base_path}/data/{timestamp}/system_info/platform_info.json"
+    file_path = f"{data_dir}/system_info/platform_info.json"
     
     # Save as JSON
     with open(file_path, 'w') as f:
@@ -99,24 +101,20 @@ def save_system_info(base_path='results', timestamp=None):
     return system_info
 
 def save_task_metrics(completed_tasks, scheduler_name, processor_name, 
-                      base_path='results', timestamp=None, processor_type='single'):
+                      data_dir, processor_type='single'):
     """
-    Save task metrics to CSV files
+    Save task metrics to CSV files with updated naming
     
     Args:
         completed_tasks: List of completed Task objects
         scheduler_name: Name of the scheduler used
         processor_name: Name/identifier of the processor
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save data files
         processor_type: 'single' or 'multi'
     """
     if not completed_tasks:
         logger.warning(f"No completed tasks for {scheduler_name} on {processor_name}")
         return
-    
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Create data for CSV
     task_data = []
@@ -134,11 +132,15 @@ def save_task_metrics(completed_tasks, scheduler_name, processor_name,
         })
     
     # Create directory path based on processor type
-    dir_path = f"{base_path}/data/{timestamp}/{processor_type}_processor"
+    dir_path = f"{data_dir}/{processor_type}_processor"
     os.makedirs(dir_path, exist_ok=True)
     
-    # Create CSV file name
-    file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_tasks.csv"
+    # Simplified file naming - no need to include platform type in filename
+    if processor_type == 'single':
+        file_path = f"{dir_path}/{scheduler_name}_tasks.csv"
+    else:
+        # For multi-processor, still include the CPU identifier
+        file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_tasks.csv"
     
     # Save as CSV
     with open(file_path, 'w', newline='') as f:
@@ -149,23 +151,19 @@ def save_task_metrics(completed_tasks, scheduler_name, processor_name,
     logger.info(f"Saved task metrics to {file_path}")
 
 def save_time_series_metrics(metrics, scheduler_name, processor_name, 
-                            base_path='results', timestamp=None, processor_type='single'):
+                            data_dir, processor_type='single'):
     """
-    Save time series metrics to CSV files
+    Save time series metrics to CSV files with updated naming
     
     Args:
         metrics: Dictionary containing time series metrics
         scheduler_name: Name of the scheduler used
         processor_name: Name/identifier of the processor
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save data files
         processor_type: 'single' or 'multi'
     """
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     # Create directory path based on processor type
-    dir_path = f"{base_path}/data/{timestamp}/{processor_type}_processor"
+    dir_path = f"{data_dir}/{processor_type}_processor"
     os.makedirs(dir_path, exist_ok=True)
     
     # Get time series data
@@ -210,8 +208,12 @@ def save_time_series_metrics(metrics, scheduler_name, processor_name,
         
         data['memory_usage'] = memory_usage_history
     
-    # Create CSV file name
-    file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_timeseries.csv"
+    # Simplified file naming
+    if processor_type == 'single':
+        file_path = f"{dir_path}/{scheduler_name}_timeseries.csv"
+    else:
+        # For multi-processor, still include the specific processor or "system" identifier
+        file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_timeseries.csv"
     
     # Save as CSV if we have any data
     if data and 'time' in data:
@@ -222,23 +224,19 @@ def save_time_series_metrics(metrics, scheduler_name, processor_name,
         logger.warning(f"No time series data available for {scheduler_name} on {processor_name}")
 
 def save_scheduler_metrics(metrics, scheduler_name, processor_name, 
-                          base_path='results', timestamp=None, processor_type='single'):
+                          data_dir, processor_type='single'):
     """
-    Save scheduler metrics to a JSON file
+    Save scheduler metrics to a JSON file with updated naming
     
     Args:
         metrics: Dictionary containing scheduler metrics
         scheduler_name: Name of the scheduler used
         processor_name: Name/identifier of the processor
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save data files
         processor_type: 'single' or 'multi'
     """
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     # Create directory path based on processor type
-    dir_path = f"{base_path}/data/{timestamp}/{processor_type}_processor"
+    dir_path = f"{data_dir}/{processor_type}_processor"
     os.makedirs(dir_path, exist_ok=True)
     
     # Extract scalar metrics (excluding time series and task lists)
@@ -253,8 +251,12 @@ def save_scheduler_metrics(metrics, scheduler_name, processor_name,
         # Add scalar values
         scalar_metrics[key] = value
     
-    # Create JSON file name
-    file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_metrics.json"
+    # Simplified file naming
+    if processor_type == 'single':
+        file_path = f"{dir_path}/{scheduler_name}_metrics.json"
+    else:
+        # For multi-processor, still include the specific processor identifier
+        file_path = f"{dir_path}/{scheduler_name}_{processor_name.replace(' ', '_')}_metrics.json"
     
     # Save as JSON
     with open(file_path, 'w') as f:
@@ -262,22 +264,17 @@ def save_scheduler_metrics(metrics, scheduler_name, processor_name,
     
     logger.info(f"Saved scheduler metrics to {file_path}")
 
-def save_multi_processor_metrics(system_metrics, scheduler_name, 
-                                base_path='results', timestamp=None):
+def save_multi_processor_metrics(system_metrics, scheduler_name, data_dir):
     """
-    Save multi-processor system metrics to a JSON file
+    Save multi-processor system metrics to a JSON file with updated naming
     
     Args:
         system_metrics: Dictionary containing system-wide metrics
         scheduler_name: Name of the scheduler used
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save data files
     """
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     # Create directory path
-    dir_path = f"{base_path}/data/{timestamp}/multi_processor"
+    dir_path = f"{data_dir}/multi_processor"
     os.makedirs(dir_path, exist_ok=True)
     
     # Extract system-wide metrics (excluding time series, task lists, and per-processor details)
@@ -292,7 +289,7 @@ def save_multi_processor_metrics(system_metrics, scheduler_name,
         # Add scalar values
         system_metrics_copy[key] = value
     
-    # Create JSON file name
+    # Simplified file name
     file_path = f"{dir_path}/{scheduler_name}_system_metrics.json"
     
     # Save as JSON
@@ -301,32 +298,30 @@ def save_multi_processor_metrics(system_metrics, scheduler_name,
     
     logger.info(f"Saved multi-processor system metrics to {file_path}")
 
-def save_comparison_results(results, scheduler_names, base_path='results', timestamp=None):
+def save_comparison_results(results, scheduler_names, data_dir):
     """
-    Save comparison results to a JSON file
+    Save comparison results to a JSON file with updated naming
     
     Args:
         results: Dictionary containing comparison results
         scheduler_names: List of scheduler names compared
-        base_path: Base path for results directory
-        timestamp: Timestamp string for directory naming
+        data_dir: Directory path to save data files
     """
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
     # Create directory path
-    dir_path = f"{base_path}/data/{timestamp}"
+    dir_path = f"{data_dir}"
     os.makedirs(dir_path, exist_ok=True)
+    
+    # Get platform information
+    platform_info = get_platform_info()
     
     # Create a copy of the results to modify
     comparison_data = {
         'schedulers': scheduler_names,
-        'timestamp': timestamp,
-        'platform': get_platform_info()['type'],
+        'platform': platform_info['type'],
         'results': results
     }
     
-    # Create JSON file name
+    # File name
     file_path = f"{dir_path}/comparison_results.json"
     
     # Save as JSON
