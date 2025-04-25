@@ -30,12 +30,8 @@ coverage.xml
 .pytest_cache/
 
 # Project specific output and temp files
-results/single_processor/*
-results/multi_processor/*
-results/comparison/*
-!results/single_processor/.gitkeep
-!results/multi_processor/.gitkeep
-!results/comparison/.gitkeep
+results/data/*
+
 
 # Logs
 *.log
