@@ -636,7 +636,7 @@ def main():
             logger.warning("No valid results available for platform comparison. Skipping platform comparison.")
     
     logger.info(f"Task scheduling completed successfully. Data saved with timestamp: {run_timestamp}")
-    logger.info(f"To generate visualizations, run: python visualize.py --data-dir results/data/{run_timestamp}")
+    logger.info(f"To generate visualisations, run: python visualise.py --data-dir results/data/{run_timestamp}")
 
 if __name__ == "__main__":
     main()

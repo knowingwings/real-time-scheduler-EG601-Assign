@@ -57,7 +57,8 @@ ML_SCHEDULER = {
         'cpu_load',
         'memory_usage'
     ],
-    'algorithm': 'linear_regression'  # Options: 'linear_regression', 'decision_tree'
+    'algorithm': 'decision_tree',  # Changed from 'linear_regression' to 'decision_tree'
+    'max_depth': 5  # Added a specific parameter for decision trees
 }
 
 # Performance Comparison Parameters

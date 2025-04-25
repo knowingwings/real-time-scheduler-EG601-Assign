@@ -1,7 +1,7 @@
 """
-Machine Learning-Based Scheduler
+Machine Learning-Based Scheduler with Decision Tree
 
-Implements a scheduler that uses simple machine learning techniques 
+Implements a scheduler that uses Decision Trees as a machine learning technique 
 to improve task scheduling decisions.
 """
 
@@ -11,18 +11,18 @@ import psutil
 import logging
 import numpy as np
 from queue import PriorityQueue
-from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
 from collections import deque
 
 class MLScheduler:
     """
     Machine Learning-Based Scheduler
     
-    Uses a simple linear regression model to predict task execution time
+    Uses a decision tree model to predict task execution time
     and optimise scheduling decisions.
     """
     
-    def __init__(self, history_size=50, min_training_samples=20):
+    def __init__(self, history_size=50, min_training_samples=20, max_depth=5):
         # Using PriorityQueue for priority-based ordering
         self.task_queue = PriorityQueue()
         self.current_task = None
@@ -33,8 +33,8 @@ class MLScheduler:
         self.preempted_tasks = []
         self.min_training_samples = min_training_samples
         
-        # ML components
-        self.model = LinearRegression()
+        # ML components - Decision Tree instead of Linear Regression
+        self.model = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
         self.trained = False
         self.history = deque(maxlen=history_size)  # Store recent task execution data
         self.feature_names = ['priority', 'arrival_pattern', 'queue_length', 'cpu_load', 'memory_usage']
@@ -50,7 +50,8 @@ class MLScheduler:
             'memory_usage': [],
             'timestamp': [],
             'prediction_errors': [],
-            'training_events': []
+            'training_events': [],
+            'feature_importances': {}  # Track feature importances from decision tree
         }
         self.logger = logging.getLogger(__name__)
     
@@ -79,7 +80,9 @@ class MLScheduler:
         priority_value = task.priority.value
         
         # Use a combination of priority and predicted time when model is trained
-        scheduling_value = priority_value if not predicted_time else priority_value + (predicted_time / 10.0)
+        # For decision trees, we can give more weight to the prediction since trees can capture 
+        # non-linear relationships better
+        scheduling_value = priority_value if not predicted_time else priority_value + (predicted_time / 5.0)
         
         # Add to queue with scheduling value as key (lower value = higher priority)
         self.task_queue.put((scheduling_value, id(task), task))
@@ -124,7 +127,7 @@ class MLScheduler:
             return None
     
     def _train_model(self):
-        """Train the ML model using execution history"""
+        """Train the Decision Tree model using execution history"""
         if len(self.history) < self.min_training_samples:
             # Need enough samples to train
             return False
@@ -146,13 +149,14 @@ class MLScheduler:
             # Record training event timestamp
             self.metrics['training_events'].append(time.time())
             
-            self.logger.info(f"ML model trained with {len(self.history)} samples")
+            self.logger.info(f"Decision Tree model trained with {len(self.history)} samples")
             
-            # Calculate and log model coefficients
-            coef_values = self.model.coef_
-            self.logger.info("Model coefficients:")
-            for name, value in zip(self.feature_names, coef_values):
-                self.logger.info(f"  {name}: {value:.4f}")
+            # Calculate and log feature importances (a benefit of using trees)
+            importances = self.model.feature_importances_
+            for i, importance in enumerate(importances):
+                feature_name = self.feature_names[i]
+                self.metrics['feature_importances'][feature_name] = float(importance)
+                self.logger.info(f"  {feature_name}: {importance:.4f}")
             
             return True
         except Exception as e:
@@ -325,5 +329,7 @@ class MLScheduler:
                 'prediction_errors': self.metrics['prediction_errors'],
                 'model_trained': self.trained,
                 'training_events': self.metrics['training_events'],
-                'training_samples': len(self.history)
+                'training_samples': len(self.history),
+                'feature_importances': self.metrics['feature_importances'],
+                'algorithm': 'decision_tree'
             }

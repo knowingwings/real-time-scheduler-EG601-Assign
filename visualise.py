@@ -3,12 +3,12 @@
 Visualisation Tool for Task Scheduling Data
 
 This script processes CSV and JSON data files collected during scheduling simulations
-and generates visualizations for analysis. It can be run after simulations to create
+and generates visualisations for analysis. It can be run after simulations to create
 charts and graphs for the report.
 
 Usage:
     python visualise.py --data-dir results/data/TIMESTAMP
-    python visualise.py --data-dir results/data/TIMESTAMP --output-dir results/visualizations
+    python visualise.py --data-dir results/data/TIMESTAMP --output-dir results/visualisations
     python visualise.py --data-dir results/data/TIMESTAMP --scheduler FCFS
 """
 
@@ -649,24 +649,24 @@ def generate_report(single_metrics, multi_metrics, report_path):
 
 def process_directory(data_dir, output_dir=None, schedulers=None):
     """
-    Process data files in a directory and generate visualizations
+    Process data files in a directory and generate visualisations
     
     Args:
         data_dir: Path to the directory containing data files
-        output_dir: Path to save visualizations (if None, uses data_dir/visualizations)
+        output_dir: Path to save visualisations (if None, uses data_dir/visualisations)
         schedulers: List of schedulers to process (if None, processes all found)
     """
     data_dir = Path(data_dir)
     
     # Default output directory
     if output_dir is None:
-        output_dir = data_dir.parent / f"visualizations_{data_dir.name}"
+        output_dir = data_dir.parent / f"visualisations_{data_dir.name}"
     
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
     logger.info(f"Processing data from {data_dir}")
-    logger.info(f"Saving visualizations to {output_dir}")
+    logger.info(f"Saving visualisations to {output_dir}")
     
     # Load system information
     system_info_path = data_dir / "system_info" / "platform_info.json"
@@ -676,7 +676,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
             system_info = json.load(f)
         logger.info(f"Loaded system info: {system_info['system']} {system_info['node']}")
     
-    # Create subdirectories for visualizations
+    # Create subdirectories for visualisations
     vis_single_dir = os.path.join(output_dir, "single_processor")
     vis_multi_dir = os.path.join(output_dir, "multi_processor")
     vis_compare_dir = os.path.join(output_dir, "comparison")
@@ -719,7 +719,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
             if tasks_path.exists():
                 tasks_df = pd.read_csv(tasks_path)
                 
-                # Generate task visualizations
+                # Generate task visualisations
                 plot_task_completion(
                     tasks_df, 
                     f"{scheduler} on Single Processor",
@@ -749,7 +749,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
             if timeseries_path.exists():
                 timeseries_df = pd.read_csv(timeseries_path)
                 
-                # Generate timeseries visualizations
+                # Generate timeseries visualisations
                 plot_memory_usage(
                     timeseries_df,
                     f"{scheduler} on Single Processor",
@@ -804,7 +804,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
                     
                     tasks_df = pd.read_csv(task_file)
                     
-                    # Generate per-processor visualizations
+                    # Generate per-processor visualisations
                     plot_task_completion(
                         tasks_df, 
                         f"{scheduler} on {processor_name}",
@@ -832,7 +832,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
                 if all_tasks:
                     combined_df = pd.concat(all_tasks)
                     
-                    # Generate combined visualizations
+                    # Generate combined visualisations
                     plot_task_completion(
                         combined_df, 
                         f"{scheduler} on Multi-Processor (All CPUs)",
@@ -862,7 +862,7 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
             if timeseries_path.exists():
                 timeseries_df = pd.read_csv(timeseries_path)
                 
-                # Generate timeseries visualizations
+                # Generate timeseries visualisations
                 plot_memory_usage(
                     timeseries_df,
                     f"{scheduler} on Multi-Processor",
@@ -934,13 +934,13 @@ def process_directory(data_dir, output_dir=None, schedulers=None):
         except Exception as e:
             logger.error(f"Error generating report: {e}")
     
-    logger.info("Visualization generation complete")
+    logger.info("Visualisation generation complete")
 
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(description='Visualise task scheduling data')
     parser.add_argument('--data-dir', required=True, help='Directory containing data files')
-    parser.add_argument('--output-dir', help='Directory to save visualizations')
+    parser.add_argument('--output-dir', help='Directory to save visualisations')
     parser.add_argument('--scheduler', action='append', dest='schedulers', 
                         help='Specific scheduler to visualise (can be used multiple times)')
     
