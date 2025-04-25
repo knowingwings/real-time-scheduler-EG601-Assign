@@ -8,9 +8,7 @@ import time
 import logging
 import os
 import argparse
-import platform
 import sys
-import psutil
 from datetime import datetime
 
 # Import project modules
@@ -27,6 +25,7 @@ from src.utils.data_collector import (
     save_multi_processor_metrics, save_comparison_results
 )
 from src.utils.metrics import MetricsCalculator
+from src.utils.platform_utils import get_platform_info
 from config.params import (
     TASK_CONFIG, SINGLE_PROCESSOR, MULTI_PROCESSOR,
     SIMULATION, ML_SCHEDULER, COMPARISON
@@ -61,33 +60,6 @@ def setup_logging():
 # Global logger will be set up when this module is imported
 logger = None
 timestamp = None
-
-def get_platform_info():
-    """Get information about the current platform"""
-    system_info = {
-        'system': platform.system(),
-        'node': platform.node(),
-        'release': platform.release(),
-        'version': platform.version(),
-        'machine': platform.machine(),
-        'processor': platform.processor(),
-        'cpu_count': psutil.cpu_count(logical=False),
-        'cpu_count_logical': psutil.cpu_count(logical=True),
-        'memory_total': psutil.virtual_memory().total,
-        'memory_available': psutil.virtual_memory().available
-    }
-    
-    # Determine platform type
-    if 'raspberry' in system_info['node'].lower():
-        system_info['type'] = 'raspberry_pi_3'
-    elif system_info['system'] == 'Darwin':
-        system_info['type'] = 'macbook' if 'MacBook' in platform.node() else 'mac_desktop'
-    elif system_info['system'] == 'Windows':
-        system_info['type'] = 'windows_laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'windows_desktop'
-    else:
-        system_info['type'] = 'unknown'
-    
-    return system_info
 
 def run_single_processor(tasks, data_dir, simulation=False):
     """
@@ -142,7 +114,7 @@ def run_single_processor(tasks, data_dir, simulation=False):
                 scheduler.completed_tasks,
                 name,
                 SINGLE_PROCESSOR['name'],
-                data_dir,  # Updated to use data_dir
+                data_dir,
                 processor_type='single'
             )
             
@@ -151,7 +123,7 @@ def run_single_processor(tasks, data_dir, simulation=False):
                 metrics,
                 name,
                 SINGLE_PROCESSOR['name'],
-                data_dir,  # Updated to use data_dir
+                data_dir,
                 processor_type='single'
             )
             
@@ -160,7 +132,7 @@ def run_single_processor(tasks, data_dir, simulation=False):
                 metrics,
                 name,
                 SINGLE_PROCESSOR['name'],
-                data_dir,  # Updated to use data_dir
+                data_dir,
                 processor_type='single'
             )
             
@@ -246,7 +218,7 @@ def run_multi_processor(tasks, data_dir, simulation=False):
             save_multi_processor_metrics(
                 metrics,
                 name,
-                data_dir  # Updated to use data_dir
+                data_dir
             )
             
             # Save time series metrics
@@ -254,7 +226,7 @@ def run_multi_processor(tasks, data_dir, simulation=False):
                 metrics,
                 name,
                 f"System-{MULTI_PROCESSOR['strategy']}",
-                data_dir,  # Updated to use data_dir
+                data_dir,
                 processor_type='multi'
             )
             
@@ -267,7 +239,7 @@ def run_multi_processor(tasks, data_dir, simulation=False):
                             proc.scheduler.completed_tasks,
                             name,
                             f"CPU-{i+1}",
-                            data_dir,  # Updated to use data_dir
+                            data_dir,
                             processor_type='multi'
                         )
                 
@@ -282,7 +254,7 @@ def run_multi_processor(tasks, data_dir, simulation=False):
                         all_completed_tasks,
                         name,
                         "All-CPUs",
-                        data_dir,  # Updated to use data_dir
+                        data_dir,
                         processor_type='multi'
                     )
                     
@@ -459,7 +431,7 @@ def compare_algorithms(single_metrics, multi_metrics, data_dir):
     save_comparison_results(
         comparison_results,
         list(set([*single_metrics.keys(), *multi_metrics.keys()])),
-        data_dir  # Updated to use data_dir
+        data_dir
     )
     
     logger.info("Completed algorithm comparison")
@@ -474,7 +446,7 @@ def compare_platforms(platform_info, current_metrics, data_dir):
         data_dir: Directory path to save files
         
     Returns:
-        None (saves metrics for later comparison)
+        None (saves metrics for later cross-platform comparison)
     """
     # Determine platform type
     platform_type = platform_info.get('type', 'unknown')
@@ -513,15 +485,11 @@ def parse_arguments():
     parser.add_argument('--speed', type=float, default=SIMULATION['speed_factor'], help='Simulation speed factor')
     parser.add_argument('--visualise', action='store_true', help='Generate visualisations after simulation')
     
-    # Use a safer way to access task count - either through the total across all priorities
-    # or falling back to a default value of 50
+    # Calculate total tasks across all priorities
     total_tasks = 0
-    if 'high_priority' in TASK_CONFIG and 'count' in TASK_CONFIG['high_priority']:
-        total_tasks += TASK_CONFIG['high_priority']['count']
-    if 'medium_priority' in TASK_CONFIG and 'count' in TASK_CONFIG['medium_priority']:
-        total_tasks += TASK_CONFIG['medium_priority']['count']
-    if 'low_priority' in TASK_CONFIG and 'count' in TASK_CONFIG['low_priority']:
-        total_tasks += TASK_CONFIG['low_priority']['count']
+    for priority, config in TASK_CONFIG.items():
+        if 'count' in config:
+            total_tasks += config['count']
     
     parser.add_argument('--tasks', type=int, default=total_tasks if total_tasks > 0 else 50, 
                         help='Total number of tasks to generate')
@@ -544,36 +512,27 @@ def main():
     # Update task count if provided - distribute proportionally across priority levels
     if args.tasks and args.tasks > 0:
         # Calculate the original distribution ratio
-        high_count = TASK_CONFIG.get('high_priority', {}).get('count', 20)
-        medium_count = TASK_CONFIG.get('medium_priority', {}).get('count', 20)
-        low_count = TASK_CONFIG.get('low_priority', {}).get('count', 10)
+        priority_counts = {p: config.get('count', 0) for p, config in TASK_CONFIG.items()}
+        total_original = sum(priority_counts.values())
         
-        total_original = high_count + medium_count + low_count
         if total_original > 0:
             # Calculate new counts maintaining the same ratio
-            high_ratio = high_count / total_original
-            medium_ratio = medium_count / total_original
-            low_ratio = low_count / total_original
+            priority_ratios = {p: count/total_original for p, count in priority_counts.items()}
             
-            # Update the counts
-            if 'high_priority' in TASK_CONFIG:
-                TASK_CONFIG['high_priority']['count'] = int(args.tasks * high_ratio)
-            if 'medium_priority' in TASK_CONFIG:
-                TASK_CONFIG['medium_priority']['count'] = int(args.tasks * medium_ratio)
-            if 'low_priority' in TASK_CONFIG:
-                TASK_CONFIG['low_priority']['count'] = int(args.tasks * low_ratio)
+            # Update the counts in TASK_CONFIG
+            for priority, ratio in priority_ratios.items():
+                if priority in TASK_CONFIG:
+                    TASK_CONFIG[priority]['count'] = int(args.tasks * ratio)
             
             # Adjust for any rounding errors to ensure total equals args.tasks
-            current_total = (TASK_CONFIG.get('high_priority', {}).get('count', 0) + 
-                             TASK_CONFIG.get('medium_priority', {}).get('count', 0) + 
-                             TASK_CONFIG.get('low_priority', {}).get('count', 0))
+            current_total = sum(TASK_CONFIG[p].get('count', 0) for p in TASK_CONFIG)
             
-            if current_total != args.tasks and 'high_priority' in TASK_CONFIG:
-                TASK_CONFIG['high_priority']['count'] += (args.tasks - current_total)
+            if current_total != args.tasks and Priority.HIGH in TASK_CONFIG:
+                TASK_CONFIG[Priority.HIGH]['count'] += (args.tasks - current_total)
     
     # Set up output directories and get timestamp if needed
-    timestamp, data_dir = ensure_output_dir()  # Updated to get data_dir
-    save_system_info(data_dir)  # Updated to use data_dir
+    timestamp, data_dir = ensure_output_dir()
+    save_system_info(data_dir)
     
     # Get platform information
     platform_info = get_platform_info()
@@ -612,7 +571,7 @@ def main():
             # Make sure to pass None if a result doesn't exist
             single_data = results.get('single')
             multi_data = results.get('multi')
-            compare_algorithms(single_data, multi_data, data_dir)  # Updated to use data_dir
+            compare_algorithms(single_data, multi_data, data_dir)
         else:
             logger.warning("No results available for comparison. Skipping algorithm comparison.")
     
@@ -626,7 +585,7 @@ def main():
             has_valid_results = True
             
         if has_valid_results:
-            compare_platforms(platform_info, results, data_dir)  # Updated to use data_dir
+            compare_platforms(platform_info, results, data_dir)
         else:
             logger.warning("No valid results available for platform comparison. Skipping platform comparison.")
     

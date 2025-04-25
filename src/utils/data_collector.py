@@ -12,42 +12,11 @@ import pandas as pd
 import json
 import time
 from datetime import datetime
-import platform
-import psutil
 import logging
 from typing import Dict, List, Any, Optional
+from src.utils.platform_utils import get_platform_info, extract_platform_from_dir
 
 logger = logging.getLogger(__name__)
-
-def get_platform_info() -> Dict[str, Any]:
-    """Get information about the current platform"""
-    system_info = {
-        'system': platform.system(),
-        'node': platform.node(),
-        'release': platform.release(),
-        'version': platform.version(),
-        'machine': platform.machine(),
-        'processor': platform.processor(),
-        'cpu_count': psutil.cpu_count(logical=False),
-        'cpu_count_logical': psutil.cpu_count(logical=True),
-        'memory_total': psutil.virtual_memory().total,
-        'memory_available': psutil.virtual_memory().available,
-        'timestamp': datetime.now().strftime('%Y%m%d_%H%M%S')
-    }
-    
-    # Determine platform type
-    if 'raspberry' in system_info['node'].lower():
-        system_info['type'] = 'raspberry_pi_3'
-    elif system_info['system'] == 'Darwin':
-        system_info['type'] = 'macbook' if 'MacBook' in platform.node() else 'mac_desktop'
-    elif system_info['system'] == 'Windows':
-        system_info['type'] = 'windows_laptop' if hasattr(psutil, 'sensors_battery') and psutil.sensors_battery() else 'windows_desktop'
-    elif system_info['system'] == 'Linux':
-        system_info['type'] = 'linux_desktop'  # Default for Linux
-    else:
-        system_info['type'] = 'unknown'
-    
-    return system_info
 
 def ensure_output_dir(base_path='results'):
     """
@@ -306,6 +275,10 @@ def save_comparison_results(results, scheduler_names, data_dir):
         results: Dictionary containing comparison results
         scheduler_names: List of scheduler names compared
         data_dir: Directory path to save data files
+    
+    Note:
+        This function is used for cross-algorithm and cross-platform comparisons
+        to preserve results for later analysis and reporting.
     """
     # Create directory path
     dir_path = f"{data_dir}"

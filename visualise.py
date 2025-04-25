@@ -32,6 +32,27 @@ import re
 import logging
 from pathlib import Path
 
+# Import platform utilities
+try:
+    from src.utils.platform_utils import extract_platform_from_dir
+except ImportError:
+    # Define a fallback version if the module is not found
+    def extract_platform_from_dir(data_dir):
+        """
+        Extract platform type from the directory name (fallback implementation)
+        
+        Args:
+            data_dir: Path to the data directory
+        
+        Returns:
+            Extracted platform type or None if not found
+        """
+        basename = os.path.basename(data_dir)
+        match = re.search(r'\d{8}_\d{6}_([\w_]+)', basename)
+        if match:
+            return match.group(1)
+        return None
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -68,27 +89,6 @@ def ensure_output_dir(output_path):
     """Ensure the output directory exists"""
     os.makedirs(output_path, exist_ok=True)
     return output_path
-
-def extract_platform_from_dir(data_dir):
-    """
-    Extract platform type from the directory name
-    
-    Args:
-        data_dir: Path to the data directory
-    
-    Returns:
-        Extracted platform type or None if not found
-    """
-    # Extract the basename of the directory
-    basename = os.path.basename(data_dir)
-    
-    # Try to extract platform using regex
-    # Pattern: timestamp_platform_type
-    match = re.search(r'\d{8}_\d{6}_([\w_]+)', basename)
-    if match:
-        return match.group(1)  # Return the platform type
-    
-    return None
 
 # Function to find task and metrics files with the updated naming convention
 def find_data_files(data_dir, scheduler_name, processor_type='single'):
@@ -570,19 +570,18 @@ def create_task_density_heatmap(metrics, scheduler_name, output_path=None):
     Create a heatmap showing task density patterns over time by priority level
     
     Args:
-        metrics: Metrics dictionary containing task execution data
+        metrics: Metrics dictionary containing task execution data or DataFrame of task data
         scheduler_name: Name of the scheduler
         output_path: Base path for saving the heatmap
     """
     plt.figure(figsize=(12, 6))
     
     # First check if we have tasks data in a dataframe format (from CSV read)
-    # This is more likely in the visualization script context
     tasks_df = None
     if isinstance(metrics, pd.DataFrame):
         tasks_df = metrics
         
-    # If metrics is still a dictionary (original behavior), attempt to extract task data
+    # If metrics is still a dictionary, attempt to extract task data
     completed_tasks = []
     
     if tasks_df is None:
@@ -807,15 +806,15 @@ def create_resource_bottleneck_heatmap(metrics, scheduler_name, output_path=None
     # Use dummy data if any metric is missing
     if not memory_usage:
         memory_usage = [0] * len(timestamps)
-        print(f"Warning: No memory usage data for {scheduler_name}, using zeros")
+        logger.warning(f"No memory usage data for {scheduler_name}, using zeros")
     
     if not queue_length:
         queue_length = [0] * len(timestamps)
-        print(f"Warning: No queue length data for {scheduler_name}, using zeros")
+        logger.warning(f"No queue length data for {scheduler_name}, using zeros")
         
     if not cpu_usage:
         cpu_usage = [0] * len(timestamps)
-        print(f"Warning: No CPU usage data for {scheduler_name}, using zeros")
+        logger.warning(f"No CPU usage data for {scheduler_name}, using zeros")
     
     # Ensure all lists are the same length as timestamps
     min_length = len(timestamps)
@@ -1115,6 +1114,7 @@ def _radar_factory(num_vars, frame='circle'):
     register_projection(RadarAxes)
     
     return theta
+
 def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
     """
     Create an improved radar chart comparing different algorithms across multiple metrics
@@ -1173,7 +1173,7 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
             available_metrics.append((metric_key, metric_name, lower_is_better))
     
     # Add extra debugging
-    print(f"Available metrics for radar chart: {[m[1] for m in available_metrics]}")
+    logger.info(f"Available metrics for radar chart: {[m[1] for m in available_metrics]}")
     
     if not available_metrics:
         plt.figure(figsize=(10, 6))
@@ -1207,11 +1207,11 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
             
             # If value is still None, use a default value (0)
             if value is None:
-                print(f"Warning: No value found for {algo}, metric {metric_key}")
+                logger.warning(f"No value found for {algo}, metric {metric_key}")
                 value = 0
             
             # Log the actual values for debugging
-            print(f"{algo} - {metric_key} ({used_key}): {value}")
+            logger.info(f"{algo} - {metric_key} ({used_key}): {value}")
             
             # Special handling for ML scheduler with extreme or missing values
             if algo == 'ML-Based':
@@ -1220,10 +1220,10 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
                     # Try to find avg_throughput instead
                     if 'avg_throughput' in metrics:
                         value = metrics['avg_throughput']
-                        print(f"  Using avg_throughput instead: {value}")
+                        logger.info(f"  Using avg_throughput instead: {value}")
                     elif 'throughput' in metrics:
                         value = metrics['throughput']
-                        print(f"  Using throughput instead: {value}")
+                        logger.info(f"  Using throughput instead: {value}")
             
             # Collect all values for later normalization
             all_values_by_metric[metric_key].append(value)
@@ -1263,7 +1263,7 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
             # Handle empty or constant metrics
             if not sanitized_values or max(sanitized_values) == min(sanitized_values):
                 normalized_value = 0.5  # Neutral value
-                print(f"Using neutral value (0.5) for {algo_name}, metric {metric_key}")
+                logger.info(f"Using neutral value (0.5) for {algo_name}, metric {metric_key}")
             else:
                 min_val = min(sanitized_values)
                 max_val = max(sanitized_values)
@@ -1279,24 +1279,24 @@ def create_radar_chart_comparison(metrics_by_algorithm, output_path=None):
                         regular_normalized = (clamped_value - min_val) / (max_val - min_val)
                         # Then invert it for "lower is better" metrics
                         normalized_value = 1 - regular_normalized
-                        print(f"  INVERSION: {metric_key} (lower is better) - {clamped_value} normalized to {regular_normalized}, inverted to {normalized_value}")
+                        logger.info(f"  INVERSION: {metric_key} (lower is better) - {clamped_value} normalized to {regular_normalized}, inverted to {normalized_value}")
                     else:
                         normalized_value = 0.5
                 else:
                     # Higher is better
                     if max_val > min_val:
                         normalized_value = (clamped_value - min_val) / (max_val - min_val)
-                        print(f"  NO INVERSION: {metric_key} (higher is better) - {clamped_value} normalized to {normalized_value}")
+                        logger.info(f"  NO INVERSION: {metric_key} (higher is better) - {clamped_value} normalized to {normalized_value}")
                     else:
                         normalized_value = 0.5
             
             # Ensure ML scheduler never gets perfect 0 to avoid line effect
             if algo_name == 'ML-Based' and normalized_value < 0.05:
                 normalized_value = 0.05
-                print(f"Adjusting very low value for ML-Based on {metric_key} to 0.05")
+                logger.info(f"Adjusting very low value for ML-Based on {metric_key} to 0.05")
             
             normalized_algo_data.append(normalized_value)
-            print(f"Normalized {algo_name} - {metric_key}: {value} -> {normalized_value}")
+            logger.info(f"Normalized {algo_name} - {metric_key}: {value} -> {normalized_value}")
         
         normalized_data.append((algo_name, normalized_algo_data))
     
