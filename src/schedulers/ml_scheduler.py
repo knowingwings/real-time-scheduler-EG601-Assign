@@ -291,11 +291,8 @@ class MLScheduler:
         with self.lock:
             # Calculate average waiting time with error handling
             waiting_times = [task.waiting_time for task in self.completed_tasks 
-                           if task.waiting_time is not None]
+                        if task.waiting_time is not None]
             avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
-            
-            # Calculate average prediction error with error handling
-            avg_prediction_error = sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']) if self.metrics['prediction_errors'] else 0
             
             # Calculate waiting times by priority
             waiting_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
@@ -317,11 +314,14 @@ class MLScheduler:
                     if priority_name in tasks_by_priority:
                         tasks_by_priority[priority_name] += 1
             
+            # Calculate average prediction error with error handling
+            avg_prediction_error = sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']) if self.metrics['prediction_errors'] else 0
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'avg_waiting_time': avg_waiting_time,
-                'avg_waiting_by_priority': avg_wait_by_priority,
-                'tasks_by_priority': tasks_by_priority,
+                'avg_waiting_time': avg_waiting_time,  # Already using standardized key
+                'avg_waiting_by_priority': avg_wait_by_priority,  # Ensure consistent naming
+                'tasks_by_priority': tasks_by_priority,  # Ensure consistent format
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],

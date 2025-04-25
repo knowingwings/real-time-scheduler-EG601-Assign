@@ -332,14 +332,23 @@ def plot_algorithm_comparison(metrics_by_algorithm, metric_name, title, ylabel, 
     algorithms = []
     values = []
     
+    # This function assumes all schedulers now use standardized metric key names:
+    # - 'avg_waiting_time' for average waiting time
+    # - 'avg_waiting_by_priority' for waiting times by priority
+    # - 'tasks_by_priority' for task counts by priority
+    
     for algo, metrics in metrics_by_algorithm.items():
-        # Handle both direct values and nested dictionaries
-        if isinstance(metrics, dict) and metric_name in metrics:
-            # metrics is a dictionary with metric_name as a key
-            algorithms.append(algo)
-            values.append(metrics[metric_name])
+        # Skip if metrics is None
+        if metrics is None:
+            continue
+            
+        # Extract the metric value
+        if isinstance(metrics, dict):
+            if metric_name in metrics and metrics[metric_name] is not None:
+                algorithms.append(algo)
+                values.append(metrics[metric_name])
         elif not isinstance(metrics, dict):
-            # metrics is a direct value
+            # Direct value
             algorithms.append(algo)
             values.append(metrics)
     

@@ -212,8 +212,8 @@ class EDFScheduler:
             
             # Calculate average completion time
             completion_times = [(task.completion_time - task.arrival_time) 
-                               for task in self.completed_tasks 
-                               if task.completion_time is not None]
+                            for task in self.completed_tasks 
+                            if task.completion_time is not None]
             avg_completion_time = sum(completion_times) / len(completion_times) if completion_times else 0
             
             # Calculate waiting times by priority
@@ -229,11 +229,20 @@ class EDFScheduler:
             for priority, times in waiting_by_priority.items():
                 avg_wait_by_priority[priority] = sum(times) / len(times) if times else 0
             
+            # Count tasks by priority
+            tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for task in self.completed_tasks:
+                if hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in tasks_by_priority:
+                        tasks_by_priority[priority_name] += 1
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'avg_waiting_time': avg_waiting_time,
+                'avg_waiting_time': avg_waiting_time,  # Already using standardized key
                 'avg_completion_time': avg_completion_time,
-                'avg_waiting_by_priority': avg_wait_by_priority,
+                'avg_waiting_by_priority': avg_wait_by_priority,  # Ensure consistent naming
+                'tasks_by_priority': tasks_by_priority,  # Add priority analysis
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],

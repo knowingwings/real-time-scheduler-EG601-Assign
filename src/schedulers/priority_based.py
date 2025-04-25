@@ -244,7 +244,7 @@ class PriorityScheduler:
     def get_metrics(self):
         """Get execution metrics"""
         with self.lock:
-            # Calculate average waiting time by priority
+            # Calculate waiting times by priority
             waiting_times = {}
             for priority in Priority:
                 priority_tasks = [task for task in self.completed_tasks 
@@ -254,9 +254,24 @@ class PriorityScheduler:
                 else:
                     waiting_times[priority.name] = 0
             
+            # Calculate overall average waiting time
+            all_waiting_times = [task.waiting_time for task in self.completed_tasks 
+                            if task.waiting_time is not None]
+            avg_waiting_time = sum(all_waiting_times) / len(all_waiting_times) if all_waiting_times else 0
+            
+            # Count tasks by priority
+            tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for task in self.completed_tasks:
+                if hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in tasks_by_priority:
+                        tasks_by_priority[priority_name] += 1
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'waiting_times_by_priority': waiting_times,
+                'avg_waiting_time': avg_waiting_time,  # Add standardized overall average
+                'avg_waiting_by_priority': waiting_times,  # Standardized key name
+                'tasks_by_priority': tasks_by_priority,  # Add priority analysis
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],

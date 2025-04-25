@@ -125,9 +125,31 @@ class FCFSScheduler:
                             if task.waiting_time is not None]
             avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
             
+            # Calculate waiting times by priority
+            waiting_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+            for task in self.completed_tasks:
+                if task.waiting_time is not None and hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in waiting_by_priority:
+                        waiting_by_priority[priority_name].append(task.waiting_time)
+            
+            avg_waiting_by_priority = {}
+            for priority, times in waiting_by_priority.items():
+                avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
+            
+            # Count tasks by priority
+            tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for task in self.completed_tasks:
+                if hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in tasks_by_priority:
+                        tasks_by_priority[priority_name] += 1
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'average_waiting_time': avg_waiting_time,
+                'avg_waiting_time': avg_waiting_time,  # Standardized key name
+                'avg_waiting_by_priority': avg_waiting_by_priority,  # Standardized key name
+                'tasks_by_priority': tasks_by_priority,  # Add priority analysis
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp']
