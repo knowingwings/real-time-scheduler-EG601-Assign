@@ -65,7 +65,7 @@ ML_SCHEDULER = {
 COMPARISON = {
     'platforms': [
         {
-            'name': 'Raspberry Pi 3',
+            'name': 'Raspberry Pi 4',
             'type': 'embedded'
         },
         {
