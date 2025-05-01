@@ -203,14 +203,16 @@ def analyze_waiting_times(all_results: Dict[str, Dict[str, List[Dict]]]) -> Dict
             
             # Calculate 95% confidence intervals
             confidence_intervals = {}
+            # Ensure sufficient data points for confidence intervals
             for priority, times in scheduler_priority_waiting_times.items():
-                if times and len(times) > 1:
+                if len(times) < 2:
+                    logger.warning(f"Insufficient data for confidence interval calculation for priority {priority}. Using default values.")
+                    confidence_intervals[priority] = (np.mean(times) if times else 0, 0)
+                else:
                     mean = np.mean(times)
                     confidence = stats.t.interval(0.95, len(times)-1, loc=mean, scale=stats.sem(times))
                     margin = confidence[1] - mean
                     confidence_intervals[priority] = (mean, margin)
-                else:
-                    confidence_intervals[priority] = (np.mean(times) if times else 0, 0)
             
             waiting_times['confidence_intervals'][scheduler_type] = confidence_intervals
     

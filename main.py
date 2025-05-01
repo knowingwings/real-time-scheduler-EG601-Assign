@@ -19,7 +19,12 @@ from typing import Dict, List, Any, Tuple, Optional
 from src.task_generator import TaskGenerator, Priority
 from src.schedulers import FCFSScheduler, EDFScheduler, PriorityScheduler, MLScheduler, PriorityBasicScheduler
 from src.processors import SingleProcessor, MultiProcessor
-from src.utils.data_collector import ensure_output_dir, save_system_info, save_task_metrics, save_time_series_metrics, save_scheduler_metrics, save_multi_processor_metrics, create_scenario_descriptions
+from src.utils.data_collector import (
+    ensure_output_dir, save_system_info, save_task_metrics,
+    save_time_series_metrics, save_scheduler_metrics,
+    save_multi_processor_metrics, create_scenario_descriptions,
+    combine_run_metrics
+)
 from src.utils.metrics import MetricsCalculator
 from src.utils.json_utils import save_json
 from config.params import TASK_CONFIG, SIMULATION
@@ -205,6 +210,7 @@ def run_simulation(
         Tuple of (metrics dictionary, experiment directory)
     """
     start_time = time.time()
+    logger = logging.getLogger(__name__)
     logger.info(f"Starting {processor_type} processor simulation with {scheduler_type} scheduler (Scenario {scenario}, Run {run_number})")
     
     # Create task configuration and generator
@@ -227,59 +233,111 @@ def run_simulation(
     else:
         data_dir = experiment_dir
     
-    if processor_type == 'single':
-        # Single processor simulation
-        scheduler = create_scheduler(scheduler_type)
-        processor = SingleProcessor(scheduler)
-        processor.add_tasks(tasks)
-        
-        # Run simulation
-        processor.run(simulation=simulation_mode, speed_factor=speed_factor)
-        
-        # Get metrics
-        metrics = processor.get_metrics()
-        
-        # Save metrics and task data
-        save_task_metrics(scheduler.completed_tasks, scheduler_name, processor.name, 
-                         data_dir, scenario, run_number, 'single')
-        save_time_series_metrics(metrics, scheduler_name, processor.name, 
-                               data_dir, scenario, run_number, 'single')
-        save_scheduler_metrics(metrics, scheduler_name, processor.name, 
-                              data_dir, scenario, run_number, 'single')
-        
-        # Add scenario and run metadata
-        metrics['scenario'] = scenario
-        metrics['run_number'] = run_number
-        metrics['scheduler_type'] = scheduler_type
-        metrics['processor_type'] = processor_type
-        
-    else:
-        # Multi-processor simulation
-        processor_count = 4  # Using 4 cores for Raspberry Pi 3
-        schedulers = [create_scheduler(scheduler_type) for _ in range(processor_count)]
-        processor = MultiProcessor(schedulers, processor_count=processor_count)
-        processor.add_tasks(tasks)
-        
-        # Run simulation
-        processor.run(simulation=simulation_mode, speed_factor=speed_factor)
-        
-        # Get metrics
-        metrics = processor.get_metrics()
-        
-        # Save metrics and task data
-        save_multi_processor_metrics(metrics, scheduler_name, data_dir, scenario, run_number)
-        
-        # Also save individual processor metrics
-        for i, p_metrics in enumerate(metrics.get('per_processor_metrics', [])):
-            cpu_name = f"CPU-{i+1}"
-            save_scheduler_metrics(p_metrics, scheduler_name, cpu_name, 
-                                 data_dir, scenario, run_number, 'multi')
-        
-        # Add scenario and run metadata
-        metrics['scenario'] = scenario
-        metrics['run_number'] = run_number
-        metrics['scheduler_type'] = scheduler_type
-        metrics['processor_type'] = processor_type
+    try:
+        if processor_type == 'single':
+            # Single processor simulation
+            scheduler = create_scheduler(scheduler_type)
+            processor = SingleProcessor(scheduler)
+            processor.add_tasks(tasks)
+            
+            # Run simulation
+            processor.run(simulation=simulation_mode, speed_factor=speed_factor)
+            
+            # Get metrics with error handling
+            try:
+                metrics = processor.get_metrics()
+                logger.info(f"Successfully collected metrics for {scheduler_name} scheduler")
+            except Exception as e:
+                logger.error(f"Error collecting metrics from processor: {str(e)}")
+                # Create empty metrics to prevent further errors
+                metrics = {
+                    'completed_tasks': 0,
+                    'avg_waiting_time': 0.0,
+                    'simulation_duration': time.time() - start_time
+                }
+            
+            # Save metrics and task data with error handling
+            try:
+                save_task_metrics(scheduler.completed_tasks, scheduler_name, processor.name, 
+                                data_dir, scenario, run_number, 'single')
+            except Exception as e:
+                logger.error(f"Error saving task metrics: {str(e)}")
+            
+            try:
+                save_time_series_metrics(metrics, scheduler_name, processor.name, 
+                                    data_dir, scenario, run_number, 'single')
+            except Exception as e:
+                logger.error(f"Error saving time series metrics: {str(e)}")
+            
+            try:
+                save_scheduler_metrics(metrics, scheduler_name, processor.name, 
+                                    data_dir, scenario, run_number, 'single')
+            except Exception as e:
+                logger.error(f"Error saving scheduler metrics: {str(e)}")
+            
+            # Add scenario and run metadata
+            metrics['scenario'] = scenario
+            metrics['run_number'] = run_number
+            metrics['scheduler_type'] = scheduler_type
+            metrics['processor_type'] = processor_type
+            
+        else:
+            # Multi-processor simulation
+            processor_count = 4  # Using 4 cores for Raspberry Pi 3
+            schedulers = [create_scheduler(scheduler_type) for _ in range(processor_count)]
+            processor = MultiProcessor(schedulers, processor_count=processor_count)
+            processor.add_tasks(tasks)
+            
+            # Run simulation
+            processor.run(simulation=simulation_mode, speed_factor=speed_factor)
+            
+            # Get metrics with error handling
+            try:
+                metrics = processor.get_metrics()
+                logger.info(f"Successfully collected metrics for multi-processor {scheduler_name} scheduler")
+            except Exception as e:
+                logger.error(f"Error collecting metrics from multi-processor: {str(e)}")
+                # Create empty metrics to prevent further errors
+                metrics = {
+                    'processor_count': processor_count,
+                    'strategy': getattr(processor, 'strategy', 'unknown'),
+                    'total_completed_tasks': 0,
+                    'avg_waiting_time': 0.0,
+                    'simulation_duration': time.time() - start_time,
+                    'per_processor_metrics': []
+                }
+            
+            # Save metrics with error handling
+            try:
+                save_multi_processor_metrics(metrics, scheduler_name, data_dir, scenario, run_number)
+            except Exception as e:
+                logger.error(f"Error saving multi-processor metrics: {str(e)}")
+            
+            # Also save individual processor metrics
+            for i, p_metrics in enumerate(metrics.get('per_processor_metrics', [])):
+                try:
+                    cpu_name = f"CPU-{i+1}"
+                    save_scheduler_metrics(p_metrics, scheduler_name, cpu_name, 
+                                        data_dir, scenario, run_number, 'multi')
+                except Exception as e:
+                    logger.error(f"Error saving processor {i+1} metrics: {str(e)}")
+            
+            # Add scenario and run metadata
+            metrics['scenario'] = scenario
+            metrics['run_number'] = run_number
+            metrics['scheduler_type'] = scheduler_type
+            metrics['processor_type'] = processor_type
+    except Exception as e:
+        logger.error(f"Error during simulation: {str(e)}")
+        # Create minimal metrics to prevent further errors
+        metrics = {
+            'scenario': scenario,
+            'run_number': run_number,
+            'scheduler_type': scheduler_type,
+            'processor_type': processor_type,
+            'error': str(e),
+            'simulation_duration': time.time() - start_time
+        }
     
     end_time = time.time()
     execution_time = end_time - start_time
@@ -296,9 +354,9 @@ def run_simulation(
     logger.info(f"Completed simulation in {execution_time:.2f} seconds")
     return metrics, data_dir
 
-def run_simulations(args: argparse.Namespace):
+def run_simulations(args):
     """
-    Run all simulations with the specified schedulers - runs each scheduler sequentially
+    Run all simulations with specified parameters
     
     Args:
         args: Command-line arguments
@@ -306,18 +364,32 @@ def run_simulations(args: argparse.Namespace):
     Returns:
         Tuple of (results dictionary, experiment directory)
     """
-    # Initialize results dict for all schedulers
     all_results = {}
     experiment_dir = None
     
-    # Determine which schedulers to run
+    # Get scheduler types
     scheduler_types = []
     if 'all' in args.schedulers:
         scheduler_types = ['fcfs', 'edf', 'priority', 'priority_basic', 'ml']
     else:
         scheduler_types = args.schedulers
     
-    # Run each scheduler sequentially through all scenarios and runs
+    # Create experiment directory
+    timestamp, data_dir = ensure_output_dir(args.output_dir)
+    experiment_dir = data_dir
+    
+    # Save system info and scenario descriptions
+    save_system_info(data_dir)
+    create_scenario_descriptions(data_dir)
+    
+    # Track completion status
+    completion_status = {
+        'total_runs': len(scheduler_types) * args.scenarios * args.runs * (1 if args.single and not args.multi else 2),
+        'completed_runs': 0,
+        'failed_runs': 0
+    }
+    
+    # Run simulations
     for scheduler_type in scheduler_types:
         logger.info(f"Starting simulations for {get_scheduler_name(scheduler_type)} scheduler")
         
@@ -332,37 +404,57 @@ def run_simulations(args: argparse.Namespace):
                 
                 # Single processor simulation if enabled
                 if args.single or not args.multi:
-                    metrics, experiment_dir = run_simulation(
-                        scheduler_type=scheduler_type,
-                        processor_type='single',
-                        scenario=scenario,
-                        run_number=run,
-                        simulation_mode=args.simulation,
-                        speed_factor=args.speed,
-                        tasks_override=args.tasks,
-                        output_dir=args.output_dir,
-                        experiment_dir=experiment_dir
-                    )
-                    
-                    all_results[scheduler_type]['single'].append(metrics)
+                    try:
+                        metrics, _ = run_simulation(
+                            scheduler_type=scheduler_type,
+                            processor_type='single',
+                            scenario=scenario,
+                            run_number=run,
+                            simulation_mode=args.simulation,
+                            speed_factor=args.speed,
+                            tasks_override=args.tasks,
+                            output_dir=args.output_dir,
+                            experiment_dir=experiment_dir
+                        )
+                        
+                        all_results[scheduler_type]['single'].append(metrics)
+                        completion_status['completed_runs'] += 1
+                    except Exception as e:
+                        logger.error(f"Error in single processor simulation: {str(e)}")
+                        completion_status['failed_runs'] += 1
                 
                 # Multi-processor simulation if enabled
                 if args.multi or not args.single:
-                    metrics, experiment_dir = run_simulation(
-                        scheduler_type=scheduler_type,
-                        processor_type='multi',
-                        scenario=scenario,
-                        run_number=run,
-                        simulation_mode=args.simulation,
-                        speed_factor=args.speed,
-                        tasks_override=args.tasks,
-                        output_dir=args.output_dir,
-                        experiment_dir=experiment_dir
-                    )
-                    
-                    all_results[scheduler_type]['multi'].append(metrics)
+                    try:
+                        metrics, _ = run_simulation(
+                            scheduler_type=scheduler_type,
+                            processor_type='multi',
+                            scenario=scenario,
+                            run_number=run,
+                            simulation_mode=args.simulation,
+                            speed_factor=args.speed,
+                            tasks_override=args.tasks,
+                            output_dir=args.output_dir,
+                            experiment_dir=experiment_dir
+                        )
+                        
+                        all_results[scheduler_type]['multi'].append(metrics)
+                        completion_status['completed_runs'] += 1
+                    except Exception as e:
+                        logger.error(f"Error in multi-processor simulation: {str(e)}")
+                        completion_status['failed_runs'] += 1
         
         logger.info(f"Completed all simulations for {get_scheduler_name(scheduler_type)} scheduler")
+    
+    # Run post-processing to combine metrics
+    try:
+        combine_run_metrics(data_dir)
+        logger.info("Successfully combined run metrics")
+    except Exception as e:
+        logger.error(f"Error combining run metrics: {str(e)}")
+    
+    # Log completion status
+    logger.info(f"Simulation complete: {completion_status['completed_runs']} of {completion_status['total_runs']} runs completed successfully, {completion_status['failed_runs']} runs failed")
     
     return all_results, experiment_dir
 

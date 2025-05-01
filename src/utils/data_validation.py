@@ -12,13 +12,6 @@ from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Constants for data validation
-MAX_WAITING_TIME = 60.0     # Max reasonable waiting time (seconds)
-MAX_THROUGHPUT = 350.0      # Increased to accommodate observed values around 300 tasks/sec
-MIN_DEADLINE_RATE = 0.0     # Min deadline satisfaction rate (percent)
-MAX_DEADLINE_RATE = 100.0   # Max deadline satisfaction rate (percent)
-MAX_PREDICTION_ERROR = 20.0 # Max reasonable prediction error (seconds)
-
 def validate_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate metrics to ensure they are within reasonable ranges
@@ -55,35 +48,35 @@ def validate_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     
     # Validate waiting time
     if 'avg_waiting_time' in validated:
-        if validated['avg_waiting_time'] > MAX_WAITING_TIME or validated['avg_waiting_time'] < 0:
+        if validated['avg_waiting_time'] < 0:
             logger.warning(
                 f"Unrealistic waiting time detected: {validated['avg_waiting_time']}s. Fixing value."
             )
-            validated['avg_waiting_time'] = min(MAX_WAITING_TIME, max(0, validated['avg_waiting_time']))
+            validated['avg_waiting_time'] = max(0, validated['avg_waiting_time'])
     
     # Validate waiting times by priority
     if 'avg_waiting_by_priority' in validated:
         for priority, waiting_time in list(validated['avg_waiting_by_priority'].items()):
-            if waiting_time > MAX_WAITING_TIME or waiting_time < 0:
+            if waiting_time < 0:
                 logger.warning(
                     f"Unrealistic {priority} priority waiting time: {waiting_time}s. Fixing value."
                 )
-                validated['avg_waiting_by_priority'][priority] = min(MAX_WAITING_TIME, max(0, waiting_time))
+                validated['avg_waiting_by_priority'][priority] = max(0, waiting_time)
     
     # Validate throughput
     if 'avg_throughput' in validated:
-        if validated['avg_throughput'] > MAX_THROUGHPUT or validated['avg_throughput'] < 0:
+        if validated['avg_throughput'] < 0:
             logger.warning(
                 f"Unrealistic throughput detected: {validated['avg_throughput']} tasks/s. Fixing value."
             )
-            validated['avg_throughput'] = min(MAX_THROUGHPUT, max(0, validated['avg_throughput']))
+            validated['avg_throughput'] = max(0, validated['avg_throughput'])
     
     if 'system_throughput' in validated:
-        if validated['system_throughput'] > MAX_THROUGHPUT or validated['system_throughput'] < 0:
+        if validated['system_throughput'] < 0:
             logger.warning(
                 f"Unrealistic system throughput detected: {validated['system_throughput']} tasks/s. Fixing value."
             )
-            validated['system_throughput'] = min(MAX_THROUGHPUT, max(0, validated['system_throughput']))
+            validated['system_throughput'] = max(0, validated['system_throughput'])
     
     # Validate deadline satisfaction rate
     if 'deadline_miss_rate' in validated:
@@ -92,21 +85,21 @@ def validate_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(
                 f"Invalid deadline miss rate detected: {miss_rate}. Clamping to valid range."
             )
-            validated['deadline_miss_rate'] = min(1.0, max(0.0, 0.0 if np.isnan(miss_rate) else miss_rate))
+            validated['deadline_miss_rate'] = max(0.0, 0.0 if np.isnan(miss_rate) else miss_rate)
     
     # Validate prediction errors
     if 'average_prediction_error' in validated:
-        if validated['average_prediction_error'] > MAX_PREDICTION_ERROR or validated['average_prediction_error'] < 0:
+        if validated['average_prediction_error'] < 0:
             logger.warning(
                 f"Unrealistic prediction error: {validated['average_prediction_error']}s. Fixing value."
             )
-            validated['average_prediction_error'] = min(MAX_PREDICTION_ERROR, max(0, validated['average_prediction_error']))
+            validated['average_prediction_error'] = max(0, validated['average_prediction_error'])
     
     # Ensure prediction errors are realistic
     if 'prediction_errors' in validated and validated['prediction_errors']:
         errors = validated['prediction_errors']
         validated['prediction_errors'] = [
-            min(MAX_PREDICTION_ERROR, max(0.0, error)) for error in errors
+            max(0.0, error) for error in errors
         ]
         
         # Update average prediction error
@@ -133,13 +126,19 @@ def validate_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     validated[history_key] = [0.0]  # Generic default
             
-            # Ensure all elements are positive and within reasonable ranges
+            # Ensure all elements are positive
             if history_key == 'memory_usage_history' or history_key == 'cpu_usage_history':
-                validated[history_key] = [min(100, max(0, value)) for value in validated[history_key]]
+                validated[history_key] = [max(0, value) for value in validated[history_key]]
             elif history_key == 'throughput_history':
-                validated[history_key] = [min(MAX_THROUGHPUT, max(0, value)) for value in validated[history_key]]
+                validated[history_key] = [max(0, value) for value in validated[history_key]]
             elif history_key == 'queue_length_history':
                 validated[history_key] = [max(0, value) for value in validated[history_key]]
+    
+    # Add validation for missing or invalid time series data
+    for history_key in ['queue_length_history', 'memory_usage_history', 'timestamp_history']:
+        if history_key not in validated or not validated[history_key]:
+            validated[history_key] = [0.0]  # Default to empty or zero values
+            logger.warning(f"Missing or invalid {history_key}, initialized with default values.")
     
     return validated
 
@@ -219,8 +218,8 @@ def validate_ml_prediction_error(prediction_data: List[Dict[str, float]]) -> Lis
             continue
             
         # Ensure reasonable error (can't be exactly zero)
-        if error <= 0 or error > MAX_PREDICTION_ERROR or np.isnan(error) or np.isinf(error):
-            error = min(MAX_PREDICTION_ERROR, max(0.05, 0.05 if np.isnan(error) or np.isinf(error) else error))
+        if error <= 0 or np.isnan(error) or np.isinf(error):
+            error = max(0.05, 0.05 if np.isnan(error) or np.isinf(error) else error)
             
         validated.append({
             'tasks_processed': tasks,
@@ -252,19 +251,19 @@ def validate_deadline_satisfaction_data(deadline_data: Dict) -> Dict:
     # Validate by_scheduler data
     if 'by_scheduler' in validated:
         for scheduler, rate in list(validated['by_scheduler'].items()):
-            if rate < MIN_DEADLINE_RATE or rate > MAX_DEADLINE_RATE or np.isnan(rate) or np.isinf(rate):
+            if np.isnan(rate) or np.isinf(rate):
                 logger.warning(f"Invalid deadline satisfaction rate for {scheduler}: {rate}%. Fixing value.")
                 if scheduler == 'edf':
                     # EDF should have high deadline satisfaction
                     validated['by_scheduler'][scheduler] = 95.0
                 else:
-                    validated['by_scheduler'][scheduler] = min(MAX_DEADLINE_RATE, max(MIN_DEADLINE_RATE, 0.0 if np.isnan(rate) or np.isinf(rate) else rate))
+                    validated['by_scheduler'][scheduler] = 0.0
     
     # Validate by_scenario data
     if 'by_scenario' in validated:
         for scenario, scenario_data in list(validated['by_scenario'].items()):
             for scheduler, rate in list(scenario_data.items()):
-                if rate < MIN_DEADLINE_RATE or rate > MAX_DEADLINE_RATE or np.isnan(rate) or np.isinf(rate):
+                if np.isnan(rate) or np.isinf(rate):
                     logger.warning(f"Invalid deadline rate in scenario {scenario} for {scheduler}: {rate}%. Fixing value.")
                     # Use sensible defaults based on scheduler and scenario
                     if scheduler == 'edf':
@@ -273,19 +272,19 @@ def validate_deadline_satisfaction_data(deadline_data: Dict) -> Dict:
                         else:  # High load
                             validated['by_scenario'][scenario][scheduler] = 65.0
                     else:
-                        validated['by_scenario'][scenario][scheduler] = min(MAX_DEADLINE_RATE, max(MIN_DEADLINE_RATE, 0.0 if np.isnan(rate) or np.isinf(rate) else rate))
+                        validated['by_scenario'][scenario][scheduler] = 0.0
     
     # Ensure EDF always has valid data for normal load
     if 'by_scenario' in validated and '1' in validated['by_scenario'] and 'edf' in validated['by_scenario']['1']:
         edf_normal = validated['by_scenario']['1']['edf']
-        if edf_normal < 0 or np.isnan(edf_normal):
+        if np.isnan(edf_normal):
             logger.warning(f"Invalid EDF normal load rate: {edf_normal}%. Setting to 95%.")
             validated['by_scenario']['1']['edf'] = 95.0  # EDF should perform well in normal load
     
     # High load scenario for EDF
     if 'by_scenario' in validated and '2' in validated['by_scenario'] and 'edf' in validated['by_scenario']['2']:
         edf_high = validated['by_scenario']['2']['edf']
-        if edf_high < 0 or np.isnan(edf_high):
+        if np.isnan(edf_high):
             logger.warning(f"Invalid EDF high load rate: {edf_high}%. Setting to 65%.")
             validated['by_scenario']['2']['edf'] = 65.0  # EDF typically performs worse under high load
     

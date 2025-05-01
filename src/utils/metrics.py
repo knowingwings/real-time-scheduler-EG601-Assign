@@ -403,3 +403,327 @@ class MetricsCalculator:
         analysis['avg_waiting_time'] = avg_waiting
         
         return analysis
+    
+"""
+Standardized Metrics Collector
+
+This module provides a unified interface for collecting metrics across 
+different schedulers to ensure consistent data collection.
+"""
+
+import time
+import threading
+import psutil
+import logging
+import numpy as np
+from typing import Dict, List, Any, Optional, Union
+from collections import defaultdict
+from enum import Enum
+
+from src.task_generator import Priority
+
+logger = logging.getLogger(__name__)
+
+class MetricsCollector:
+    """
+    Unified metrics collector that can be used with any scheduler.
+    
+    Ensures consistent metric collection across different scheduler implementations.
+    """
+    
+    def __init__(self, scheduler_name: str, processor_name: str = "Unknown"):
+        """
+        Initialize metrics collector
+        
+        Args:
+            scheduler_name: Name of the scheduler (FCFS, EDF, Priority, ML)
+            processor_name: Name of the processor (e.g., CPU-1)
+        """
+        self.scheduler_name = scheduler_name
+        self.processor_name = processor_name
+        self.start_time = time.time()
+        self.lock = threading.RLock()
+        self.running = False
+        self.collection_thread = None
+        
+        # Scheduler and processor metrics
+        self.queue_length_history = []
+        self.memory_usage_history = []
+        self.timestamp_history = []
+        self.cpu_usage_history = []
+        self.throughput_history = []
+        
+        # Task metrics
+        self.completed_tasks = []
+        self.current_task = None
+        self.completed_task_count_history = []
+        
+        # Deadline metrics
+        self.deadline_misses = 0
+        self.deadline_tasks = 0
+        self.deadline_met = 0
+        
+        # Priority inversion metrics
+        self.priority_inversions = 0
+        self.priority_inheritance_events = 0
+        
+        # ML-specific metrics
+        self.prediction_errors = []
+        self.training_events = []
+        self.feature_importances = {}
+        
+        # Collection interval (seconds)
+        self.collection_interval = 0.5
+    
+    def start_collection(self):
+        """Start the metrics collection process"""
+        with self.lock:
+            self.running = True
+            self.start_time = time.time()
+            self.collection_thread = threading.Thread(target=self._collect_metrics)
+            self.collection_thread.daemon = True
+            self.collection_thread.start()
+            logger.info(f"Started metrics collection for {self.scheduler_name} on {self.processor_name}")
+    
+    def stop_collection(self):
+        """Stop the metrics collection process"""
+        with self.lock:
+            self.running = False
+            logger.info(f"Stopped metrics collection for {self.scheduler_name} on {self.processor_name}")
+            # Don't join thread here to avoid blocking
+    
+    def _collect_metrics(self):
+        """Background thread for collecting system metrics"""
+        logger.debug(f"Metrics collection thread started for {self.scheduler_name}")
+        
+        while self.running:
+            try:
+                # Calculate current time relative to start
+                current_time = time.time()
+                relative_time = round(current_time - self.start_time, 3)
+                
+                # Collect system metrics
+                memory_percent = psutil.virtual_memory().percent
+                cpu_percent = psutil.cpu_percent(interval=None)
+                
+                # Get queue size from scheduler (if available)
+                queue_size = self._get_queue_size()
+                
+                # Calculate throughput (tasks per second)
+                completed_count = len(self.completed_tasks)
+                throughput = completed_count / max(0.1, relative_time)
+                
+                # Store metrics safely
+                with self.lock:
+                    self.memory_usage_history.append(memory_percent)
+                    self.cpu_usage_history.append(cpu_percent)
+                    self.timestamp_history.append(relative_time)
+                    self.queue_length_history.append(queue_size)
+                    self.throughput_history.append(throughput)
+                    self.completed_task_count_history.append(completed_count)
+                
+                # Sleep until next collection
+                time.sleep(self.collection_interval)
+            except Exception as e:
+                logger.error(f"Error in metrics collection: {str(e)}")
+                time.sleep(self.collection_interval)  # Continue collecting
+    
+    def _get_queue_size(self) -> int:
+        """
+        Get current queue size from associated scheduler
+        
+        Returns:
+            Current queue size or 0 if not available
+        """
+        try:
+            # This is a placeholder - in actual implementation we would
+            # get queue size from the scheduler instance
+            # Since we don't have direct access to the scheduler here,
+            # we'll rely on task_queue_updated method to be called
+            return self.queue_length_history[-1] if self.queue_length_history else 0
+        except Exception as e:
+            logger.warning(f"Error getting queue size: {str(e)}")
+            return 0
+    
+    def task_queue_updated(self, queue_size: int):
+        """
+        Update the task queue size metric
+        
+        Args:
+            queue_size: Current queue size
+        """
+        with self.lock:
+            # Record current time
+            current_time = time.time()
+            relative_time = round(current_time - self.start_time, 3)
+            
+            self.queue_length_history.append(queue_size)
+            self.timestamp_history.append(relative_time)
+    
+    def task_started(self, task):
+        """
+        Record that a task has started execution
+        
+        Args:
+            task: The task that started
+        """
+        with self.lock:
+            self.current_task = task
+            
+            # Record start time if not set
+            if task.start_time is None:
+                task.start_time = round(time.time() - self.start_time, 3)
+                logger.debug(f"Task {task.id} started at {task.start_time:.2f}s")
+    
+    def task_completed(self, task):
+        """
+        Record that a task has completed
+        
+        Args:
+            task: The completed task
+        """
+        with self.lock:
+            # Ensure the task has all required metrics
+            if task.completion_time is None:
+                task.completion_time = round(time.time() - self.start_time, 3)
+            
+            # Calculate waiting time if not already set
+            if task.waiting_time is None and task.start_time is not None:
+                task.waiting_time = round(max(0, task.start_time - task.arrival_time), 3)
+            
+            # Check if deadline was met
+            if hasattr(task, 'deadline') and task.deadline is not None:
+                self.deadline_tasks += 1
+                if task.completion_time <= task.deadline:
+                    self.deadline_met += 1
+                else:
+                    self.deadline_misses += 1
+                    logger.debug(f"Task {task.id} missed deadline by {task.completion_time - task.deadline:.2f}s")
+            
+            # Record ML prediction error if available
+            if hasattr(task, 'predicted_time') and task.predicted_time is not None:
+                actual_time = round(task.completion_time - task.start_time, 3)
+                prediction_error = round(abs(task.predicted_time - actual_time), 3)
+                self.prediction_errors.append(prediction_error)
+                logger.debug(f"Prediction error for task {task.id}: {prediction_error:.2f}s")
+            
+            # Add to completed tasks
+            self.completed_tasks.append(task)
+            self.current_task = None
+    
+    def priority_inversion_detected(self):
+        """Record that a priority inversion was detected"""
+        with self.lock:
+            self.priority_inversions += 1
+    
+    def priority_inheritance_applied(self):
+        """Record that priority inheritance was applied"""
+        with self.lock:
+            self.priority_inheritance_events += 1
+    
+    def ml_training_occurred(self, feature_importances=None):
+        """
+        Record that ML model training occurred
+        
+        Args:
+            feature_importances: Optional dictionary of feature importances
+        """
+        with self.lock:
+            self.training_events.append(round(time.time() - self.start_time, 3))
+            
+            if feature_importances:
+                self.feature_importances = feature_importances
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get all collected metrics
+        
+        Returns:
+            Dictionary containing all metrics
+        """
+        with self.lock:
+            # Calculate average waiting time
+            waiting_times = [task.waiting_time for task in self.completed_tasks 
+                           if task.waiting_time is not None]
+            avg_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
+            
+            # Calculate waiting times by priority
+            waiting_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+            for task in self.completed_tasks:
+                if task.waiting_time is not None and hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in waiting_by_priority:
+                        waiting_by_priority[priority_name].append(task.waiting_time)
+            
+            avg_wait_by_priority = {}
+            for priority, times in waiting_by_priority.items():
+                avg_wait_by_priority[priority] = round(sum(times) / len(times), 3) if times else 0
+            
+            # Count tasks by priority
+            tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for task in self.completed_tasks:
+                if hasattr(task, 'priority'):
+                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                    if priority_name in tasks_by_priority:
+                        tasks_by_priority[priority_name] += 1
+            
+            # Calculate deadline metrics
+            deadline_miss_rate = (self.deadline_tasks - self.deadline_met) / self.deadline_tasks if self.deadline_tasks > 0 else 0
+            
+            # Calculate average prediction error
+            avg_prediction_error = sum(self.prediction_errors) / len(self.prediction_errors) if self.prediction_errors else 0
+            
+            # Calculate throughput
+            execution_time = time.time() - self.start_time
+            throughput = len(self.completed_tasks) / execution_time if execution_time > 0 else 0
+            
+            # Calculate CPU and memory usage
+            avg_cpu_usage = sum(self.cpu_usage_history) / len(self.cpu_usage_history) if self.cpu_usage_history else 0
+            avg_memory_usage = sum(self.memory_usage_history) / len(self.memory_usage_history) if self.memory_usage_history else 0
+            
+            # Assemble metrics dictionary
+            metrics = {
+                # Basic metrics
+                'completed_tasks': len(self.completed_tasks),
+                'avg_waiting_time': round(avg_waiting_time, 3),
+                'avg_waiting_by_priority': avg_wait_by_priority,
+                'tasks_by_priority': tasks_by_priority,
+                
+                # Time series data
+                'queue_length_history': self.queue_length_history,
+                'memory_usage_history': self.memory_usage_history,
+                'timestamp_history': self.timestamp_history,
+                'cpu_usage_history': self.cpu_usage_history,
+                'throughput_history': self.throughput_history,
+                
+                # Performance metrics
+                'avg_cpu_usage': round(avg_cpu_usage, 3),
+                'avg_memory_usage': round(avg_memory_usage, 3),
+                'avg_throughput': round(throughput, 3),
+                
+                # Deadline metrics
+                'deadline_tasks': self.deadline_tasks,
+                'deadline_met': self.deadline_met,
+                'deadline_misses': self.deadline_misses,
+                'deadline_miss_rate': round(deadline_miss_rate, 3),
+                
+                # Priority inversion metrics
+                'priority_inversions': self.priority_inversions,
+                'priority_inheritance_events': self.priority_inheritance_events
+            }
+            
+            # Add ML-specific metrics if present
+            if self.prediction_errors:
+                metrics['average_prediction_error'] = round(avg_prediction_error, 3)
+                metrics['prediction_errors'] = self.prediction_errors
+                metrics['training_events'] = self.training_events
+                metrics['model_trained'] = len(self.training_events) > 0
+                metrics['feature_importances'] = self.feature_importances
+            
+            # Ensure all collected metrics include default values for missing keys
+            for key, default_value in STANDARD_METRICS.items():
+                if key not in metrics:
+                    metrics[key] = default_value
+                    logger.warning(f"Metric {key} was missing, added with default value {default_value}")
+            
+            return metrics

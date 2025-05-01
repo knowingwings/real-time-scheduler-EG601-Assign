@@ -13,11 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Constants for validation
-MAX_WAITING_TIME = 60.0   # Maximum reasonable waiting time (seconds)
-MAX_SERVICE_TIME = 20.0   # Maximum reasonable service time (seconds)
-MAX_TURNAROUND_TIME = 120.0  # Maximum reasonable turnaround time (seconds)
-
 class Priority(Enum):
     """Task priority levels"""
     HIGH = 1
@@ -51,12 +46,6 @@ class Task:
         if service_time <= 0:
             logger.warning(f"Invalid service time for Task {task_id}: {service_time}. Setting to 0.1s.")
             self.service_time = 0.1
-        elif service_time > MAX_SERVICE_TIME:
-            logger.warning(
-                f"Excessive service time for Task {task_id}: {service_time}s. "
-                f"Capping to {MAX_SERVICE_TIME}s."
-            )
-            self.service_time = MAX_SERVICE_TIME
         else:
             self.service_time = service_time
         
@@ -95,25 +84,9 @@ class Task:
         # Calculate waiting time (time between arrival and start)
         self.waiting_time = max(0, self.start_time - self.arrival_time)
         
-        # Validate waiting time
-        if self.waiting_time > MAX_WAITING_TIME:
-            logger.warning(
-                f"Excessive waiting time for Task {self.id}: {self.waiting_time}s. "
-                f"Capping to {MAX_WAITING_TIME}s."
-            )
-            self.waiting_time = MAX_WAITING_TIME
-            
         # Calculate turnaround time (time between arrival and completion)
         self.turnaround_time = max(0, self.completion_time - self.arrival_time)
         
-        # Validate turnaround time
-        if self.turnaround_time > MAX_TURNAROUND_TIME:
-            logger.warning(
-                f"Excessive turnaround time for Task {self.id}: {self.turnaround_time}s. "
-                f"Capping to {MAX_TURNAROUND_TIME}s."
-            )
-            self.turnaround_time = MAX_TURNAROUND_TIME
-            
         # Calculate response time (time between arrival and start of execution)
         self.response_time = max(0, self.start_time - self.arrival_time)
         

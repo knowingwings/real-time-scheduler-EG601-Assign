@@ -273,9 +273,12 @@ def generate_waiting_time_charts(all_results: Dict, analysis_results: Dict, outp
                         mean, margin = ci.get('mean', 0), ci.get('margin', 0)
                     else:
                         mean, margin = ci
+                else:
+                    logger.warning(f"Missing confidence interval for {scheduler} - {priority}. Using default values.")
+                    mean, margin = 0, 0
                     
-                    plt.errorbar(x[j] + (i - 1) * width, mean, yerr=margin, fmt='none', 
-                                ecolor='black', capsize=5)
+                plt.errorbar(x[j] + (i - 1) * width, mean, yerr=margin, fmt='none', 
+                            ecolor='black', capsize=5)
     
     # Customize chart
     plt.xlabel('Scheduler')
@@ -333,7 +336,7 @@ def generate_waiting_time_charts(all_results: Dict, analysis_results: Dict, outp
 
 def generate_throughput_charts(all_results: Dict, analysis_results: Dict, output_dir: str) -> None:
     """
-    Generate throughput charts
+    Generate throughput charts with error handling
     
     Args:
         all_results: Dictionary containing simulation results
@@ -345,15 +348,15 @@ def generate_throughput_charts(all_results: Dict, analysis_results: Dict, output
         'single': {},
         'multi': {}
     }
-
+    
+    # Define schedulers list explicitly
+    schedulers = ['fcfs', 'edf', 'priority', 'ml']
+    scheduler_names = ['FCFS', 'EDF', 'Priority', 'ML-Based']
+    
+    # Initialize throughput data with defaults for all schedulers
     for scheduler in schedulers:
-        if scheduler not in throughput_data['single']:
-            throughput_data['single'][scheduler] = 0.0
-            logger.warning(f"Missing single processor throughput data for {scheduler}. Using default value.")
-        if scheduler not in throughput_data['multi']:
-            throughput_data['multi'][scheduler] = 0.0
-            logger.warning(f"Missing multi processor throughput data for {scheduler}. Using default value.")
-
+        throughput_data['single'][scheduler] = 0.0
+        throughput_data['multi'][scheduler] = 0.0
     
     if analysis_results and 'throughput' in analysis_results and 'single_vs_multi' in analysis_results['throughput']:
         # Use analysis results
@@ -397,9 +400,6 @@ def generate_throughput_charts(all_results: Dict, analysis_results: Dict, output
     plt.figure(figsize=(12, 7))
     
     # Set up bar positions
-    schedulers = ['fcfs', 'edf', 'priority', 'ml']
-    scheduler_names = ['FCFS', 'EDF', 'Priority', 'ML-Based']
-    
     x = np.arange(len(schedulers))
     width = 0.35
     
@@ -407,10 +407,17 @@ def generate_throughput_charts(all_results: Dict, analysis_results: Dict, output
     single_values = [throughput_data['single'].get(s, 0) for s in schedulers]
     multi_values = [throughput_data['multi'].get(s, 0) for s in schedulers]
     
+    # Define max throughput constant
+    MAX_THROUGHPUT = 350.0
+    
     # Ensure all values are numeric and within reason
-    single_values = ensure_numeric([min(MAX_THROUGHPUT, max(0, v)) for v in single_values])
-    multi_values = ensure_numeric([min(MAX_THROUGHPUT, max(0, v)) for v in multi_values])
+    single_values = [min(MAX_THROUGHPUT, max(0, v)) for v in single_values]
+    multi_values = [min(MAX_THROUGHPUT, max(0, v)) for v in multi_values]
 
+    # Convert to numeric arrays to avoid categorical warnings
+    single_values = np.array(single_values, dtype=float)
+    multi_values = np.array(multi_values, dtype=float)
+    
     plt.bar(x - width/2, single_values, width, label='Single Processor', color='#1976D2', alpha=0.8)
     plt.bar(x + width/2, multi_values, width, label='Multi-Processor', color='#D32F2F', alpha=0.8)
     

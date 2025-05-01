@@ -15,12 +15,6 @@ from sklearn.tree import DecisionTreeRegressor
 from collections import deque
 from src.task_generator import Priority
 
-# Constants for validation
-MAX_WAITING_TIME = 60.0   # Maximum reasonable waiting time (seconds)
-MAX_SERVICE_TIME = 20.0   # Maximum reasonable service time (seconds)
-MIN_PREDICTION = 0.1      # Minimum reasonable predicted time
-MAX_PREDICTION = 10.0     # Maximum reasonable predicted time
-
 class MLScheduler:
     """
     Machine Learning-Based Scheduler
@@ -130,15 +124,12 @@ class MLScheduler:
             # Make prediction
             prediction = self.model.predict(features)[0]
             
-            # Validate prediction - force to reasonable range
-            if prediction < MIN_PREDICTION or prediction > MAX_PREDICTION:
-                self.logger.warning(
-                    f"ML model produced extreme prediction: {prediction:.2f}s. "
-                    f"Clamping to range [{MIN_PREDICTION}, {MAX_PREDICTION}]."
-                )
+            # Only ensure non-negative prediction
+            if prediction < 0:
+                self.logger.warning(f"ML model produced negative prediction: {prediction:.2f}s. Setting to 0.1s")
+                prediction = 0.1
                 
-            # Return validated prediction
-            return max(MIN_PREDICTION, min(MAX_PREDICTION, prediction))
+            return prediction
             
         except Exception as e:
             self.logger.error(f"Prediction error: {e}")
@@ -234,9 +225,9 @@ class MLScheduler:
                     
                     # Calculate with validation
                     waiting_time = max(0, current_t - task.arrival_time)
-                    if waiting_time > MAX_WAITING_TIME:
-                        self.logger.warning(f"Excessive waiting time: {waiting_time}s. Capping to {MAX_WAITING_TIME}s")
-                        waiting_time = MAX_WAITING_TIME
+                    if waiting_time > 60.0:
+                        self.logger.warning(f"Excessive waiting time: {waiting_time}s. Capping to 60.0s")
+                        waiting_time = 60.0
                     
                     task.waiting_time = round(waiting_time, 3)
                 
@@ -257,7 +248,7 @@ class MLScheduler:
                 # Execute the task
                 if simulation:
                     # Use safe execution time
-                    service_time = min(task.service_time, MAX_SERVICE_TIME)
+                    service_time = min(task.service_time, 20.0)
                     
                     # Simulate execution by advancing time
                     self.current_time += service_time
@@ -266,7 +257,7 @@ class MLScheduler:
                     time.sleep(sleep_time)
                 else:
                     # Actually sleep for the service time in real execution
-                    service_time = min(task.service_time, MAX_SERVICE_TIME)
+                    service_time = min(task.service_time, 20.0)
                     time.sleep(service_time)
                 
                 # Record completion time
@@ -290,27 +281,20 @@ class MLScheduler:
                 with self.lock:
                     self.completed_tasks.append(task)
                     
-                    # Add to training history only if it has valid data
+                    # Add to training history if it has valid data
                     if hasattr(task, 'features') and task.service_time > 0:
                         actual_time = round(task.completion_time - task.start_time, 3)
                         if actual_time > 0:
                             self.history.append({
                                 'features': task.features,
-                                'actual_time': min(actual_time, MAX_SERVICE_TIME)  # Cap to prevent extreme values
+                                'actual_time': actual_time
                             })
                     
                     # Calculate prediction error if available
                     if hasattr(task, 'predicted_time') and task.predicted_time is not None:
                         actual_time = round(task.completion_time - task.start_time, 3)
-                        # Validate actual time
-                        actual_time = min(actual_time, MAX_SERVICE_TIME)
-                        
                         error = round(abs(task.predicted_time - actual_time), 3)
-                        # Cap error to avoid extreme values
-                        error = min(error, MAX_SERVICE_TIME)
-                        
                         self.metrics['prediction_errors'].append(error)
-                        self.logger.info(f"Prediction error for {task.id}: {error:.2f}s")
                     
                     self.current_task = None
             else:
@@ -332,6 +316,37 @@ class MLScheduler:
     def stop(self):
         """Stop the scheduler"""
         self.running = False
+
+    
+    def _initialize_metrics(self):
+        """Initialize metrics with default values to prevent NaN issues"""
+        with self.lock:
+            # Basic counters
+            self.completed_tasks = []
+            
+            # Queue metrics
+            self.queue_length_history = []
+            
+            # Timing metrics with proper initialization
+            self.waiting_times = []
+            self.response_times = []
+            self.turnaround_times = []
+            
+            # Priority metrics with proper initialization
+            self.waiting_times_by_priority = {
+                'HIGH': [],
+                'MEDIUM': [],
+                'LOW': []
+            }
+            
+            # Deadline metrics
+            self.deadline_misses = 0
+            self.deadline_met = 0
+            self.deadline_tasks = 0
+            
+            # System metrics
+            self.memory_usage_history = []
+            self.timestamp_history = []# Add this method to each scheduler class to standardize metrics collection
     
     def _collect_metrics(self):
         """Collect system metrics during execution"""

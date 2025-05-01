@@ -12,10 +12,6 @@ import logging
 from queue import PriorityQueue
 from src.task_generator import Priority
 
-# Constants for validation
-MAX_WAITING_TIME = 60.0   # Maximum reasonable waiting time (seconds)
-MAX_SERVICE_TIME = 20.0   # Maximum reasonable service time (seconds)
-
 class PriorityScheduler:
     """
     Priority-Based Scheduler with Priority Inversion Handling
@@ -219,10 +215,8 @@ class PriorityScheduler:
                         
                     task.waiting_time = max(0, round(current_t - task.arrival_time, 3))
                     
-                    # Validate waiting time
-                    if task.waiting_time > MAX_WAITING_TIME:
-                        self.logger.warning(f"Excessive waiting time: {task.waiting_time}s. Capping to {MAX_WAITING_TIME}s")
-                        task.waiting_time = MAX_WAITING_TIME
+                    if task.waiting_time > 0:
+                        self.logger.info(f"Task {task.id} waited for {task.waiting_time}s")
                 
                 # Set as current task and start execution
                 self.current_task = task
@@ -237,18 +231,14 @@ class PriorityScheduler:
                 
                 # Execute the task
                 if simulation:
-                    # Use safe execution time
-                    service_time = min(task.service_time, MAX_SERVICE_TIME)
-                    
                     # Simulate execution by advancing time
-                    self.current_time += service_time
+                    self.current_time += task.service_time
                     # Scale sleep time by speed factor
-                    sleep_time = service_time / max(0.1, speed_factor)
+                    sleep_time = task.service_time / max(0.1, speed_factor)
                     time.sleep(sleep_time)
                 else:
                     # Actually sleep for the service time in real execution
-                    sleep_time = min(task.service_time, MAX_SERVICE_TIME)
-                    time.sleep(sleep_time)
+                    time.sleep(task.service_time)
                 
                 # Record completion time
                 if simulation:
@@ -277,6 +267,37 @@ class PriorityScheduler:
         """Stop the scheduler"""
         self.running = False
     
+
+    def _initialize_metrics(self):
+        """Initialize metrics with default values to prevent NaN issues"""
+        with self.lock:
+            # Basic counters
+            self.completed_tasks = []
+            
+            # Queue metrics
+            self.queue_length_history = []
+            
+            # Timing metrics with proper initialization
+            self.waiting_times = []
+            self.response_times = []
+            self.turnaround_times = []
+            
+            # Priority metrics with proper initialization
+            self.waiting_times_by_priority = {
+                'HIGH': [],
+                'MEDIUM': [],
+                'LOW': []
+            }
+            
+            # Deadline metrics
+            self.deadline_misses = 0
+            self.deadline_met = 0
+            self.deadline_tasks = 0
+            
+            # System metrics
+            self.memory_usage_history = []
+            self.timestamp_history = []# Add this method to each scheduler class to standardize metrics collection
+
     def _collect_metrics(self):
         """Collect system metrics during execution"""
         start_time = time.time()  # Record the absolute start time

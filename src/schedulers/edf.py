@@ -208,7 +208,37 @@ class EDFScheduler:
     def stop(self):
         """Stop the scheduler"""
         self.running = False
-    
+
+    def _initialize_metrics(self):
+        """Initialize metrics with default values to prevent NaN issues"""
+        with self.lock:
+            # Basic counters
+            self.completed_tasks = []
+            
+            # Queue metrics
+            self.queue_length_history = []
+            
+            # Timing metrics with proper initialization
+            self.waiting_times = []
+            self.response_times = []
+            self.turnaround_times = []
+            
+            # Priority metrics with proper initialization
+            self.waiting_times_by_priority = {
+                'HIGH': [],
+                'MEDIUM': [],
+                'LOW': []
+            }
+            
+            # Deadline metrics
+            self.deadline_misses = 0
+            self.deadline_met = 0
+            self.deadline_tasks = 0
+            
+            # System metrics
+            self.memory_usage_history = []
+            self.timestamp_history = []# Add this method to each scheduler class to standardize metrics collection
+
     def _collect_metrics(self):
         """Collect system metrics during execution"""
         start_time = time.time()  # Record the absolute start time

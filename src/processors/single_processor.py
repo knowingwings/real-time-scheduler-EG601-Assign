@@ -8,6 +8,7 @@ import threading
 import time
 import logging
 import psutil
+from config.params import SIMULATION
 
 class SingleProcessor:
     """
@@ -136,57 +137,116 @@ class SingleProcessor:
         self.is_running = False
         self.scheduler.stop()
         self.logger.info(f"Stopping {self.name}")
+
+    def _initialize_metrics(self):
+        """Initialize metrics with proper defaults to prevent NaN issues"""
+        self.metrics = {
+            'cpu_usage': [],
+            'memory_usage': [],
+            'timestamp': [],
+            'throughput': [],
+            'utilisation': []
+        }
     
     def _collect_metrics(self):
-        """Collect performance metrics"""
+        """Collect system metrics during execution with improved error handling and initialization"""
+        # Initialize metrics if not already done
+        if not all(key in self.metrics for key in ['cpu_usage', 'memory_usage', 'timestamp', 'throughput', 'utilisation']):
+            self.metrics = {
+                'cpu_usage': [],
+                'memory_usage': [],
+                'timestamp': [],
+                'throughput': [],  # Tasks per second
+                'utilisation': []  # Percentage of time the processor is busy
+            }
+        
+        # Ensure all lists are initialized even if empty
+        for key in ['cpu_usage', 'memory_usage', 'timestamp', 'throughput', 'utilisation']:
+            if key not in self.metrics or self.metrics[key] is None:
+                self.metrics[key] = []
+        
         last_completed = 0
         last_time = time.time()
         
         while self.is_running:
-            current_time = time.time()
-            cpu_percent = psutil.cpu_percent(interval=None)
-            memory_percent = psutil.virtual_memory().percent
-            
-            # Get number of completed tasks
-            completed = len(self.scheduler.completed_tasks)
-            
-            # Calculate throughput (tasks per second)
-            elapsed = current_time - last_time
-            if elapsed > 0:
-                throughput = (completed - last_completed) / elapsed
-            else:
-                throughput = 0
+            try:
+                current_time = time.time()
                 
-            # Calculate processor utilisation
-            if hasattr(self.scheduler, 'current_task') and self.scheduler.current_task:
-                utilisation = 100  # Processor is busy
-            else:
-                utilisation = 0    # Processor is idle
-            
-            # Update metrics
-            with self.scheduler.lock:
-                self.metrics['cpu_usage'].append(cpu_percent)
-                self.metrics['memory_usage'].append(memory_percent)
-                self.metrics['timestamp'].append(current_time)
-                self.metrics['throughput'].append(throughput)
-                self.metrics['utilisation'].append(utilisation)
-            
-            # Update last values
-            last_completed = completed
-            last_time = current_time
-            
-            time.sleep(0.5)  # Collect metrics every 0.5 seconds
-    
+                # Get CPU and memory metrics safely
+                try:
+                    cpu_percent = psutil.cpu_percent(interval=None)
+                except:
+                    cpu_percent = 0
+                    
+                try:
+                    memory_percent = psutil.virtual_memory().percent
+                except:
+                    memory_percent = 0
+                
+                # Get number of completed tasks safely
+                completed = 0
+                if hasattr(self.scheduler, 'completed_tasks'):
+                    completed = len(self.scheduler.completed_tasks)
+                
+                # Calculate throughput (tasks per second) safely
+                elapsed = current_time - last_time
+                throughput = 0
+                if elapsed > 0:
+                    throughput = (completed - last_completed) / elapsed
+                
+                # Calculate processor utilisation safely
+                utilisation = 0
+                if hasattr(self.scheduler, 'current_task') and self.scheduler.current_task:
+                    utilisation = SIMULATION['processor_busy_utilization']
+                
+                # Update metrics safely
+                with self.scheduler.lock:
+                    self.metrics['cpu_usage'].append(cpu_percent)
+                    self.metrics['memory_usage'].append(memory_percent)
+                    self.metrics['timestamp'].append(current_time)
+                    self.metrics['throughput'].append(throughput)
+                    self.metrics['utilisation'].append(utilisation)
+                
+                # Update last values
+                last_completed = completed
+                last_time = current_time
+                
+                time.sleep(SIMULATION['metrics_collection_interval'])
+            except Exception as e:
+                # Log error but continue collecting
+                print(f"Error collecting metrics: {str(e)}")
+                time.sleep(SIMULATION['metrics_collection_interval'])  # Continue collecting
+
     def get_metrics(self):
-        """Get processor metrics combined with scheduler metrics"""
-        scheduler_metrics = self.scheduler.get_metrics()
+        """Get processor metrics combined with scheduler metrics with improved error handling"""
+        try:
+            scheduler_metrics = self.scheduler.get_metrics()
+        except Exception as e:
+            # If scheduler metrics fails, create an empty dict
+            scheduler_metrics = {
+                'completed_tasks': 0,
+                'avg_waiting_time': 0.0,
+                'avg_waiting_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0},
+                'tasks_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            }
         
-        # Calculate average CPU usage and memory usage
-        avg_cpu = sum(self.metrics['cpu_usage']) / len(self.metrics['cpu_usage']) if self.metrics['cpu_usage'] else 0
-        avg_memory = sum(self.metrics['memory_usage']) / len(self.metrics['memory_usage']) if self.metrics['memory_usage'] else 0
-        avg_throughput = sum(self.metrics['throughput']) / len(self.metrics['throughput']) if self.metrics['throughput'] else 0
-        avg_utilisation = sum(self.metrics['utilisation']) / len(self.metrics['utilisation']) if self.metrics['utilisation'] else 0
+        # Ensure metrics dictionary has all required keys
+        if not all(key in self.metrics for key in ['cpu_usage', 'memory_usage', 'timestamp', 'throughput']):
+            self.metrics = {
+                'cpu_usage': [0],
+                'memory_usage': [0],
+                'timestamp': [time.time()],
+                'throughput': [0],
+                'utilisation': [0]
+            }
         
+        # Calculate average CPU usage and memory usage safely
+        avg_cpu = sum(self.metrics['cpu_usage']) / max(len(self.metrics['cpu_usage']), 1)
+        avg_memory = sum(self.metrics['memory_usage']) / max(len(self.metrics['memory_usage']), 1)
+        avg_throughput = sum(self.metrics['throughput']) / max(len(self.metrics['throughput']), 1)
+        avg_utilisation = sum(self.metrics['utilisation']) / max(len(self.metrics['utilisation']), 1)
+        
+        # Create processor metrics
         processor_metrics = {
             'name': self.name,
             'avg_cpu_usage': avg_cpu,

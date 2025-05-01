@@ -44,7 +44,10 @@ MULTI_PROCESSOR = {
 SIMULATION = {
     'enabled': True,
     'speed_factor': 10.0,  # Higher values = faster simulation
-    'run_time': 120        # Maximum simulation time in seconds
+    'run_time': 120,       # Maximum simulation time in seconds
+    'metrics_collection_interval': 0.5,  # How often to collect metrics (seconds)
+    'throughput_smoothing': 0.9,        # Smoothing factor for throughput calculation (0-1)
+    'processor_busy_utilization': 100    # Utilization value when processor is busy (percent)
 }
 
 # Machine Learning Parameters
@@ -97,5 +100,6 @@ VISUALISATION = {
         'Priority': '#FF5722',# Deep Orange
         'ML-Based': '#009688' # Teal
     },
-    'save_path': 'results/'
+    'save_path': 'results/',
+    'max_throughput': 350.0   # Maximum throughput for chart scaling
 }

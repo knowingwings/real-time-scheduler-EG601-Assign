@@ -13,6 +13,7 @@ import numpy as np
 from typing import List, Dict, Any, Type, Optional
 from src.processors.single_processor import SingleProcessor
 from src.task_generator import Task, Priority
+from config.params import SIMULATION
 
 class MultiProcessor:
     """
@@ -235,143 +236,219 @@ class MultiProcessor:
         for processor in self.processors:
             processor.stop()
         self.logger.info("Stopping multi-processor system")
+
+    def _initialize_metrics(self):
+        """Initialize metrics with proper defaults to prevent NaN issues"""
+        self.metrics = {
+            'cpu_usage': [],
+            'memory_usage': [],
+            'timestamp': [],
+            'throughput': [],
+            'utilisation': []
+        }
     
     def _collect_metrics(self):
-        """Collect system-wide metrics"""
+        """Collect system-wide metrics with improved error handling and initialization"""
+        # Initialize metrics if not already done
+        if not all(key in self.metrics for key in ['total_completed_tasks', 'system_throughput']):
+            self.metrics = {
+                'total_completed_tasks': 0,
+                'avg_waiting_time': 0.0,
+                'processor_load_balance': 0.0,  # Standard deviation of processor loads
+                'system_throughput': 0.0,       # Tasks per second across all processors
+                'memory_usage_history': [],     # Track memory usage over time
+                'timestamp_history': [],        # Track timestamps for metrics
+                'queue_length_history': []      # Track queue lengths over time
+            }
+        
+        # Ensure all lists are initialized
+        for key in ['memory_usage_history', 'timestamp_history', 'queue_length_history']:
+            if key not in self.metrics or self.metrics[key] is None:
+                self.metrics[key] = []
+        
+        start_time = time.time()  # Record the absolute start time
+        last_completed = 0
+        
         while self.is_running:
-            # Collect current timestamp
-            current_time = time.time()
-            self.metrics['timestamp_history'].append(current_time)
+            try:
+                # Collect current timestamp
+                current_time = time.time()
+                self.metrics['timestamp_history'].append(current_time)
+                
+                # Collect memory usage safely
+                try:
+                    memory_percent = psutil.virtual_memory().percent
+                except:
+                    memory_percent = 0
+                self.metrics['memory_usage_history'].append(memory_percent)
+                
+                # Calculate total queue length safely
+                try:
+                    total_queue_length = sum(p.scheduler.task_queue.qsize() for p in self.processors)
+                except:
+                    total_queue_length = 0
+                self.metrics['queue_length_history'].append(total_queue_length)
+                
+                # Calculate total completed tasks safely
+                total_completed = 0
+                try:
+                    total_completed = sum(len(p.scheduler.completed_tasks) for p in self.processors)
+                except:
+                    pass
+                
+                # Calculate throughput
+                time_elapsed = current_time - start_time
+                tasks_completed_since_last = total_completed - last_completed
+                if time_elapsed > 0:
+                    current_throughput = tasks_completed_since_last / SIMULATION['metrics_collection_interval']
+                    self.metrics['system_throughput'] = (
+                        self.metrics['system_throughput'] * SIMULATION['throughput_smoothing'] + 
+                        current_throughput * (1 - SIMULATION['throughput_smoothing'])
+                    )
+                
+                last_completed = total_completed
+                
+                time.sleep(SIMULATION['metrics_collection_interval'])
+            except Exception as e:
+                # Log error but continue collecting
+                print(f"Error collecting metrics: {str(e)}")
+                time.sleep(SIMULATION['metrics_collection_interval'])
+
+    def get_metrics(self):
+        """Get comprehensive system metrics with improved error handling"""
+        # Initialize with defaults in case of failure
+        system_metrics = {
+            'processor_count': self.processor_count,
+            'strategy': self.strategy,
+            'total_completed_tasks': 0,
+            'tasks_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0},
+            'avg_waiting_time': 0.0,
+            'avg_waiting_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0},
+            'load_balance_cv': 0.0,
+            'system_throughput': 0.0,
+            'avg_cpu_usage': 0.0,
+            'avg_memory_usage': 0.0,
+            'memory_usage_history': [],
+            'timestamp_history': [],
+            'queue_length_history': [],
+            'per_processor_metrics': []
+        }
+        
+        try:
+            # Make sure we have metrics from all processors
+            processor_metrics = []
+            for p in self.processors:
+                try:
+                    metrics = p.get_metrics()
+                    processor_metrics.append(metrics)
+                except Exception as e:
+                    # Add default metrics to maintain consistency
+                    processor_metrics.append({
+                        'completed_tasks': 0,
+                        'avg_cpu_usage': 0,
+                        'avg_waiting_time': 0
+                    })
             
-            # Collect memory usage
-            memory_percent = psutil.virtual_memory().percent
-            self.metrics['memory_usage_history'].append(memory_percent)
-            
-            # Calculate total queue length across all processors
-            total_queue_length = sum(p.scheduler.task_queue.qsize() for p in self.processors)
-            self.metrics['queue_length_history'].append(total_queue_length)
-            
-            # Calculate total completed tasks
-            total_completed = sum(len(p.scheduler.completed_tasks) for p in self.processors)
+            # Calculate final values from the most recent data
+            total_completed = sum(metrics.get('completed_tasks', 0) for metrics in processor_metrics)
             
             # Calculate average waiting time across all processors
             all_waiting_times = []
             for processor in self.processors:
-                waiting_times = [task.waiting_time for task in processor.scheduler.completed_tasks 
-                              if task.waiting_time is not None]
-                all_waiting_times.extend(waiting_times)
+                try:
+                    waiting_times = [task.waiting_time for task in processor.scheduler.completed_tasks 
+                                if task.waiting_time is not None]
+                    all_waiting_times.extend(waiting_times)
+                except:
+                    pass
             
             avg_waiting_time = sum(all_waiting_times) / len(all_waiting_times) if all_waiting_times else 0
             
-            # Calculate load balance (standard deviation of queue sizes)
-            queue_sizes = [p.scheduler.task_queue.qsize() for p in self.processors]
-            load_balance = np.std(queue_sizes) if queue_sizes else 0
+            # Calculate waiting times by priority across all processors
+            waiting_times_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
+            for processor in self.processors:
+                try:
+                    for task in processor.scheduler.completed_tasks:
+                        if task.waiting_time is not None and hasattr(task, 'priority'):
+                            priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                            if priority_name in waiting_times_by_priority:
+                                waiting_times_by_priority[priority_name].append(task.waiting_time)
+                except:
+                    pass
             
-            # Calculate system throughput (completed tasks per second)
-            time_elapsed = current_time - self.start_time
-            system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
+            avg_waiting_by_priority = {}
+            for priority, times in waiting_times_by_priority.items():
+                avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
             
-            # Update metrics
-            self.metrics['total_completed_tasks'] = total_completed
-            self.metrics['avg_waiting_time'] = avg_waiting_time
-            self.metrics['processor_load_balance'] = load_balance
-            self.metrics['system_throughput'] = system_throughput
+            # Calculate load balance as coefficient of variation safely
+            completed_per_processor = [metrics.get('completed_tasks', 0) for metrics in processor_metrics]
             
-            time.sleep(0.5)  # Collect metrics every 0.5 seconds
-    
-    def get_metrics(self):
-        """
-        Get comprehensive system metrics
-        
-        Returns:
-            Dictionary containing system-wide and per-processor metrics
-        """
-        # Make sure we have metrics from all processors
-        processor_metrics = []
-        for p in self.processors:
-            try:
-                metrics = p.get_metrics()
-                processor_metrics.append(metrics)
-            except Exception as e:
-                self.logger.error(f"Error getting metrics from {p.name}: {str(e)}")
-                # Add default metrics to maintain consistency
-                processor_metrics.append({
-                    'completed_tasks': 0,
-                    'avg_cpu_usage': 0,
-                    'avg_waiting_time': 0
-                })
-        
-        # Calculate final values from the most recent data
-        total_completed = sum(metrics.get('completed_tasks', 0) for metrics in processor_metrics)
-        
-        # Calculate average waiting time across all processors (with error handling)
-        all_waiting_times = []
-        for processor in self.processors:
-            waiting_times = [task.waiting_time for task in processor.scheduler.completed_tasks 
-                          if task.waiting_time is not None]
-            all_waiting_times.extend(waiting_times)
-        
-        avg_waiting_time = sum(all_waiting_times) / len(all_waiting_times) if all_waiting_times else 0
-        
-        # Calculate waiting times by priority across all processors
-        waiting_times_by_priority = {'HIGH': [], 'MEDIUM': [], 'LOW': []}
-        for processor in self.processors:
-            for task in processor.scheduler.completed_tasks:
-                if task.waiting_time is not None and hasattr(task, 'priority'):
-                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
-                    if priority_name in waiting_times_by_priority:
-                        waiting_times_by_priority[priority_name].append(task.waiting_time)
-        
-        avg_waiting_by_priority = {}
-        for priority, times in waiting_times_by_priority.items():
-            avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
-        
-        # Calculate load balance as coefficient of variation (with error handling)
-        completed_per_processor = [metrics.get('completed_tasks', 0) for metrics in processor_metrics]
-        mean_completed = np.mean(completed_per_processor) if completed_per_processor and np.sum(completed_per_processor) > 0 else 0
-        std_completed = np.std(completed_per_processor) if completed_per_processor and np.sum(completed_per_processor) > 0 else 0
-        cv_completed = (std_completed / mean_completed) * 100 if mean_completed > 0 else 0
-        
-        # Calculate average CPU and memory usage across processors
-        avg_cpu_usage = np.mean([metrics.get('avg_cpu_usage', 0) for metrics in processor_metrics]) if processor_metrics else 0
-        avg_memory_usage = np.mean(self.metrics['memory_usage_history']) if self.metrics['memory_usage_history'] else 0
-        
-        # Calculate system throughput
-        current_time = time.time()
-        time_elapsed = current_time - self.start_time
-        system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
-        
-        # Count tasks by priority
-        tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
-        for processor in self.processors:
-            for task in processor.scheduler.completed_tasks:
-                if hasattr(task, 'priority'):
-                    priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
-                    if priority_name in tasks_by_priority:
-                        tasks_by_priority[priority_name] += 1
-        
-        # Ensure we have all required metric fields
-        for metric in processor_metrics:
-            for key in ['completed_tasks', 'avg_waiting_time', 'avg_cpu_usage']:
-                if key not in metric:
-                    metric[key] = 0
-        
-        # Compile system-wide metrics
-        system_metrics = {
-            'processor_count': self.processor_count,
-            'strategy': self.strategy,
-            'total_completed_tasks': total_completed,
-            'tasks_by_priority': tasks_by_priority,
-            'avg_waiting_time': avg_waiting_time,
-            'avg_waiting_by_priority': avg_waiting_by_priority,
-            'load_balance_cv': cv_completed,  # Lower is better (more even distribution)
-            'system_throughput': system_throughput,
-            'avg_cpu_usage': avg_cpu_usage,
-            'avg_memory_usage': avg_memory_usage,
-            'memory_usage_history': self.metrics['memory_usage_history'],
-            'timestamp_history': self.metrics['timestamp_history'],
-            'queue_length_history': self.metrics['queue_length_history'],
-            'per_processor_metrics': processor_metrics
-        }
+            # Safely calculate mean and standard deviation
+            if completed_per_processor and any(completed_per_processor):
+                mean_completed = np.mean(completed_per_processor)
+                std_completed = np.std(completed_per_processor)
+                cv_completed = (std_completed / mean_completed) * 100 if mean_completed > 0 else 0
+            else:
+                cv_completed = 0
+            
+            # Calculate average CPU and memory usage across processors
+            avg_cpu_usage = np.mean([metrics.get('avg_cpu_usage', 0) for metrics in processor_metrics]) if processor_metrics else 0
+            
+            # Calculate memory usage safely
+            if self.metrics.get('memory_usage_history'):
+                avg_memory_usage = np.mean(self.metrics['memory_usage_history'])
+            else:
+                avg_memory_usage = 0
+            
+            # Calculate system throughput safely
+            # Use pre-calculated throughput if available, otherwise calculate from task count
+            if 'system_throughput' in self.metrics and self.metrics['system_throughput'] > 0:
+                system_throughput = self.metrics['system_throughput']
+            else:
+                current_time = time.time()
+                time_elapsed = max(0.1, current_time - self.start_time)
+                system_throughput = total_completed / time_elapsed if time_elapsed > 0 else 0
+            
+            # Count tasks by priority
+            tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for processor in self.processors:
+                try:
+                    for task in processor.scheduler.completed_tasks:
+                        if hasattr(task, 'priority'):
+                            priority_name = task.priority.name if hasattr(task.priority, 'name') else str(task.priority)
+                            if priority_name in tasks_by_priority:
+                                tasks_by_priority[priority_name] += 1
+                except:
+                    pass
+            
+            # Compile system-wide metrics
+            system_metrics.update({
+                'processor_count': self.processor_count,
+                'strategy': self.strategy,
+                'total_completed_tasks': total_completed,
+                'tasks_by_priority': tasks_by_priority,
+                'avg_waiting_time': avg_waiting_time,
+                'avg_waiting_by_priority': avg_waiting_by_priority,
+                'load_balance_cv': cv_completed,
+                'system_throughput': system_throughput,
+                'avg_cpu_usage': avg_cpu_usage,
+                'avg_memory_usage': avg_memory_usage,
+                'per_processor_metrics': processor_metrics
+            })
+            
+            # Ensure history metrics are present
+            if self.metrics.get('memory_usage_history'):
+                system_metrics['memory_usage_history'] = self.metrics['memory_usage_history']
+            
+            if self.metrics.get('timestamp_history'):
+                system_metrics['timestamp_history'] = self.metrics['timestamp_history']
+            
+            if self.metrics.get('queue_length_history'):
+                system_metrics['queue_length_history'] = self.metrics['queue_length_history']
+            
+        except Exception as e:
+            # Log error but return basic metrics
+            print(f"Error calculating system metrics: {str(e)}")
+            system_metrics['error'] = str(e)
         
         return system_metrics
