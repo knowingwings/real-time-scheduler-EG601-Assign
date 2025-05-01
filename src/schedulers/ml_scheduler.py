@@ -13,6 +13,13 @@ import numpy as np
 from queue import PriorityQueue
 from sklearn.tree import DecisionTreeRegressor
 from collections import deque
+from src.task_generator import Priority
+
+# Constants for validation
+MAX_WAITING_TIME = 60.0   # Maximum reasonable waiting time (seconds)
+MAX_SERVICE_TIME = 20.0   # Maximum reasonable service time (seconds)
+MIN_PREDICTION = 0.1      # Minimum reasonable predicted time
+MAX_PREDICTION = 10.0     # Maximum reasonable predicted time
 
 class MLScheduler:
     """
@@ -27,7 +34,7 @@ class MLScheduler:
         self.task_queue = PriorityQueue()
         self.current_task = None
         self.completed_tasks = []
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # Changed to RLock for nested acquisitions
         self.running = False
         self.current_time = 0
         self.preempted_tasks = []
@@ -51,7 +58,8 @@ class MLScheduler:
             'timestamp': [],
             'prediction_errors': [],
             'training_events': [],
-            'feature_importances': {}  # Track feature importances from decision tree
+            'feature_importances': {},  # Track feature importances from decision tree
+            'deadline_misses': 0
         }
         self.logger = logging.getLogger(__name__)
     
@@ -117,11 +125,21 @@ class MLScheduler:
         ]])
     
     def _predict_execution_time(self, features):
-        """Predict task execution time using trained model"""
+        """Predict task execution time using trained model with validation"""
         try:
+            # Make prediction
             prediction = self.model.predict(features)[0]
-            # Ensure prediction is positive and reasonable
-            return max(0.1, min(10.0, prediction))
+            
+            # Validate prediction - force to reasonable range
+            if prediction < MIN_PREDICTION or prediction > MAX_PREDICTION:
+                self.logger.warning(
+                    f"ML model produced extreme prediction: {prediction:.2f}s. "
+                    f"Clamping to range [{MIN_PREDICTION}, {MAX_PREDICTION}]."
+                )
+                
+            # Return validated prediction
+            return max(MIN_PREDICTION, min(MAX_PREDICTION, prediction))
+            
         except Exception as e:
             self.logger.error(f"Prediction error: {e}")
             return None
@@ -147,16 +165,18 @@ class MLScheduler:
             self.trained = True
             
             # Record training event timestamp
-            self.metrics['training_events'].append(time.time())
+            with self.lock:
+                self.metrics['training_events'].append(time.time())
             
             self.logger.info(f"Decision Tree model trained with {len(self.history)} samples")
             
             # Calculate and log feature importances (a benefit of using trees)
             importances = self.model.feature_importances_
-            for i, importance in enumerate(importances):
-                feature_name = self.feature_names[i]
-                self.metrics['feature_importances'][feature_name] = float(importance)
-                self.logger.info(f"  {feature_name}: {importance:.4f}")
+            with self.lock:
+                for i, importance in enumerate(importances):
+                    feature_name = self.feature_names[i]
+                    self.metrics['feature_importances'][feature_name] = float(importance)
+                    self.logger.info(f"  {feature_name}: {importance:.4f}")
             
             return True
         except Exception as e:
@@ -211,8 +231,14 @@ class MLScheduler:
                         current_t = self.current_time
                     else:
                         current_t = time.time() - start_time
-                        
-                    task.waiting_time = round(max(0, current_t - task.arrival_time), 3)
+                    
+                    # Calculate with validation
+                    waiting_time = max(0, current_t - task.arrival_time)
+                    if waiting_time > MAX_WAITING_TIME:
+                        self.logger.warning(f"Excessive waiting time: {waiting_time}s. Capping to {MAX_WAITING_TIME}s")
+                        waiting_time = MAX_WAITING_TIME
+                    
+                    task.waiting_time = round(waiting_time, 3)
                 
                 # Set as current task and start execution
                 self.current_task = task
@@ -230,12 +256,18 @@ class MLScheduler:
                 
                 # Execute the task
                 if simulation:
+                    # Use safe execution time
+                    service_time = min(task.service_time, MAX_SERVICE_TIME)
+                    
                     # Simulate execution by advancing time
-                    self.current_time += task.service_time
-                    time.sleep(task.service_time / speed_factor)  # Still sleep a bit for visualisation
+                    self.current_time += service_time
+                    # Scale sleep time by speed factor
+                    sleep_time = service_time / max(0.1, speed_factor)
+                    time.sleep(sleep_time)
                 else:
                     # Actually sleep for the service time in real execution
-                    time.sleep(task.service_time)
+                    service_time = min(task.service_time, MAX_SERVICE_TIME)
+                    time.sleep(service_time)
                 
                 # Record completion time
                 if simulation:
@@ -244,6 +276,12 @@ class MLScheduler:
                     task.completion_time = time.time() - start_time
                     
                 self.logger.info(f"Completed execution of {task.id} at time {task.completion_time:.2f}")
+                
+                # Check if deadline was missed
+                if task.deadline is not None and task.completion_time > task.deadline:
+                    self.logger.warning(f"Task {task.id} missed deadline by {task.completion_time - task.deadline:.2f}s")
+                    with self.lock:
+                        self.metrics['deadline_misses'] += 1
                 
                 # Calculate metrics
                 task.calculate_metrics()
@@ -258,13 +296,19 @@ class MLScheduler:
                         if actual_time > 0:
                             self.history.append({
                                 'features': task.features,
-                                'actual_time': actual_time
+                                'actual_time': min(actual_time, MAX_SERVICE_TIME)  # Cap to prevent extreme values
                             })
                     
                     # Calculate prediction error if available
                     if hasattr(task, 'predicted_time') and task.predicted_time is not None:
                         actual_time = round(task.completion_time - task.start_time, 3)
+                        # Validate actual time
+                        actual_time = min(actual_time, MAX_SERVICE_TIME)
+                        
                         error = round(abs(task.predicted_time - actual_time), 3)
+                        # Cap error to avoid extreme values
+                        error = min(error, MAX_SERVICE_TIME)
+                        
                         self.metrics['prediction_errors'].append(error)
                         self.logger.info(f"Prediction error for {task.id}: {error:.2f}s")
                     
@@ -335,10 +379,23 @@ class MLScheduler:
                         tasks_by_priority[priority_name] += 1
             
             # Calculate average prediction error with error handling
-            avg_prediction_error = round(
-                sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']), 
-                3
-            ) if self.metrics['prediction_errors'] else 0
+            avg_prediction_error = 0
+            if self.metrics['prediction_errors']:
+                avg_prediction_error = round(
+                    sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']), 
+                    3
+                )
+            
+            # Count deadline metrics
+            deadline_tasks = 0
+            deadline_met = 0
+            for task in self.completed_tasks:
+                if task.deadline is not None:
+                    deadline_tasks += 1
+                    if task.completion_time <= task.deadline:
+                        deadline_met += 1
+            
+            deadline_miss_rate = (deadline_tasks - deadline_met) / deadline_tasks if deadline_tasks > 0 else 0
             
             return {
                 'completed_tasks': len(self.completed_tasks),
@@ -354,5 +411,8 @@ class MLScheduler:
                 'training_events': self.metrics['training_events'],
                 'training_samples': len(self.history),
                 'feature_importances': self.metrics['feature_importances'],
-                'algorithm': 'decision_tree'
+                'algorithm': 'decision_tree',
+                'deadline_tasks': deadline_tasks,
+                'deadline_met': deadline_met,
+                'deadline_miss_rate': deadline_miss_rate
             }

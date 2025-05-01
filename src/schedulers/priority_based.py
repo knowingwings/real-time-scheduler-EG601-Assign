@@ -12,6 +12,10 @@ import logging
 from queue import PriorityQueue
 from src.task_generator import Priority
 
+# Constants for validation
+MAX_WAITING_TIME = 60.0   # Maximum reasonable waiting time (seconds)
+MAX_SERVICE_TIME = 20.0   # Maximum reasonable service time (seconds)
+
 class PriorityScheduler:
     """
     Priority-Based Scheduler with Priority Inversion Handling
@@ -26,12 +30,12 @@ class PriorityScheduler:
         self.task_queue = PriorityQueue()
         self.current_task = None
         self.completed_tasks = []
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # Changed to RLock for nested acquisitions
         self.running = False
         self.current_time = 0
         self.preempted_tasks = []
         # Resources for priority inversion handling
-        self.resources = {}  # Map of resource_id -> {owner, waiters}
+        self.resources = {}  # Map of resource_id -> {owner, waiters, allocation_time}
         self.metrics = {
             'queue_length': [],
             'memory_usage': [],
@@ -84,7 +88,8 @@ class PriorityScheduler:
                 # Allocate resource
                 self.resources[resource_id] = {
                     'owner': task,
-                    'waiters': []
+                    'waiters': [],
+                    'allocation_time': time.time()  # Track allocation time
                 }
                 return True
     
@@ -98,6 +103,12 @@ class PriorityScheduler:
             if (resource_id in self.resources and 
                 self.resources[resource_id]['owner'] == task):
                 
+                # Calculate blocking duration for metrics
+                allocation_time = self.resources[resource_id].get('allocation_time', 0)
+                if allocation_time > 0:
+                    blocking_duration = time.time() - allocation_time
+                    self.logger.info(f"Resource {resource_id} was held for {blocking_duration:.2f}s")
+                
                 # Restore original priority if it was boosted
                 if hasattr(task, 'original_priority'):
                     task.priority = task.original_priority
@@ -110,6 +121,7 @@ class PriorityScheduler:
                     # Allocate to next waiter
                     next_waiter = waiters.pop(0)
                     self.resources[resource_id]['owner'] = next_waiter
+                    self.resources[resource_id]['allocation_time'] = time.time()
                     self.logger.info(f"Resource {resource_id} allocated to waiting task {next_waiter.id}")
                     
                     # Re-add this task to ready queue
@@ -118,7 +130,8 @@ class PriorityScheduler:
                     # No waiters, resource is free
                     self.resources[resource_id] = {
                         'owner': None,
-                        'waiters': []
+                        'waiters': [],
+                        'allocation_time': 0
                     }
                     
                 return True
@@ -204,7 +217,12 @@ class PriorityScheduler:
                     else:
                         current_t = time.time() - start_time
                         
-                    task.waiting_time = round(max(0, current_t - task.arrival_time), 3)
+                    task.waiting_time = max(0, round(current_t - task.arrival_time, 3))
+                    
+                    # Validate waiting time
+                    if task.waiting_time > MAX_WAITING_TIME:
+                        self.logger.warning(f"Excessive waiting time: {task.waiting_time}s. Capping to {MAX_WAITING_TIME}s")
+                        task.waiting_time = MAX_WAITING_TIME
                 
                 # Set as current task and start execution
                 self.current_task = task
@@ -219,12 +237,18 @@ class PriorityScheduler:
                 
                 # Execute the task
                 if simulation:
+                    # Use safe execution time
+                    service_time = min(task.service_time, MAX_SERVICE_TIME)
+                    
                     # Simulate execution by advancing time
-                    self.current_time += task.service_time
-                    time.sleep(task.service_time / speed_factor)  # Still sleep a bit for visualisation
+                    self.current_time += service_time
+                    # Scale sleep time by speed factor
+                    sleep_time = service_time / max(0.1, speed_factor)
+                    time.sleep(sleep_time)
                 else:
                     # Actually sleep for the service time in real execution
-                    time.sleep(task.service_time)
+                    sleep_time = min(task.service_time, MAX_SERVICE_TIME)
+                    time.sleep(sleep_time)
                 
                 # Record completion time
                 if simulation:
@@ -299,6 +323,17 @@ class PriorityScheduler:
                     if priority_name in tasks_by_priority:
                         tasks_by_priority[priority_name] += 1
             
+            # Count deadline metrics
+            deadline_tasks = 0
+            deadline_met = 0
+            for task in self.completed_tasks:
+                if task.deadline is not None:
+                    deadline_tasks += 1
+                    if task.completion_time <= task.deadline:
+                        deadline_met += 1
+            
+            deadline_miss_rate = (deadline_tasks - deadline_met) / deadline_tasks if deadline_tasks > 0 else 0
+            
             return {
                 'completed_tasks': len(self.completed_tasks),
                 'avg_waiting_time': round(avg_waiting_time, 3),  # Add standardized overall average
@@ -308,5 +343,8 @@ class PriorityScheduler:
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],
                 'priority_inversions': self.metrics['priority_inversions'],
-                'priority_inheritance_events': self.metrics['priority_inheritance_events']
+                'priority_inheritance_events': self.metrics['priority_inheritance_events'],
+                'deadline_tasks': deadline_tasks,
+                'deadline_met': deadline_met,
+                'deadline_miss_rate': deadline_miss_rate
             }

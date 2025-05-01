@@ -261,6 +261,24 @@ class EDFScheduler:
                     if priority_name in tasks_by_priority:
                         tasks_by_priority[priority_name] += 1
             
+            # Count deadline metrics properly
+            deadline_tasks = 0
+            deadline_met = 0
+            for task in self.completed_tasks:
+                if hasattr(task, 'deadline') and task.deadline is not None:
+                    deadline_tasks += 1
+                    if task.completion_time <= task.deadline:
+                        deadline_met += 1
+
+            # Calculate deadline miss rate safely
+            if deadline_tasks > 0:
+                deadline_miss_rate = (deadline_tasks - deadline_met) / deadline_tasks 
+            else:
+                deadline_miss_rate = 0.0
+
+            # Ensure deadline miss rate is between 0 and 1
+            deadline_miss_rate = max(0.0, min(1.0, deadline_miss_rate))
+
             return {
                 'completed_tasks': len(self.completed_tasks),
                 'avg_waiting_time': round(avg_waiting_time, 3),
@@ -270,5 +288,8 @@ class EDFScheduler:
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp'],
-                'deadline_misses': self.metrics['deadline_misses']
+                'deadline_misses': self.metrics['deadline_misses'],
+                'deadline_tasks': deadline_tasks,
+                'deadline_met': deadline_met,
+                'deadline_miss_rate': deadline_miss_rate
             }
