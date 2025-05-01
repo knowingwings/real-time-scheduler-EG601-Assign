@@ -173,6 +173,7 @@ class MLScheduler:
         """
         self.running = True
         self.current_time = 0
+        start_time = time.time()  # Store real-time start
         
         # Start metrics collection in a separate thread
         metrics_thread = threading.Thread(target=self._collect_metrics)
@@ -206,12 +207,22 @@ class MLScheduler:
                 
                 # Set waiting time if not already set
                 if task.waiting_time is None:
-                    current_t = time.time() if not simulation else self.current_time
-                    task.waiting_time = max(0, current_t - task.arrival_time)
+                    if simulation:
+                        current_t = self.current_time
+                    else:
+                        current_t = time.time() - start_time
+                        
+                    task.waiting_time = round(max(0, current_t - task.arrival_time), 3)
                 
                 # Set as current task and start execution
                 self.current_task = task
-                task.start_time = time.time() if not simulation else self.current_time
+                
+                # Record start time
+                if simulation:
+                    task.start_time = self.current_time
+                else:
+                    task.start_time = time.time() - start_time
+                    
                 self.logger.info(f"Starting execution of {task.id} at time {task.start_time:.2f}")
                 
                 # Extract features before execution for later training
@@ -227,7 +238,11 @@ class MLScheduler:
                     time.sleep(task.service_time)
                 
                 # Record completion time
-                task.completion_time = time.time() if not simulation else self.current_time
+                if simulation:
+                    task.completion_time = self.current_time
+                else:
+                    task.completion_time = time.time() - start_time
+                    
                 self.logger.info(f"Completed execution of {task.id} at time {task.completion_time:.2f}")
                 
                 # Calculate metrics
@@ -239,7 +254,7 @@ class MLScheduler:
                     
                     # Add to training history only if it has valid data
                     if hasattr(task, 'features') and task.service_time > 0:
-                        actual_time = task.completion_time - task.start_time
+                        actual_time = round(task.completion_time - task.start_time, 3)
                         if actual_time > 0:
                             self.history.append({
                                 'features': task.features,
@@ -248,8 +263,8 @@ class MLScheduler:
                     
                     # Calculate prediction error if available
                     if hasattr(task, 'predicted_time') and task.predicted_time is not None:
-                        actual_time = task.completion_time - task.start_time
-                        error = abs(task.predicted_time - actual_time)
+                        actual_time = round(task.completion_time - task.start_time, 3)
+                        error = round(abs(task.predicted_time - actual_time), 3)
                         self.metrics['prediction_errors'].append(error)
                         self.logger.info(f"Prediction error for {task.id}: {error:.2f}s")
                     
@@ -276,13 +291,18 @@ class MLScheduler:
     
     def _collect_metrics(self):
         """Collect system metrics during execution"""
+        start_time = time.time()  # Record the absolute start time
+        
         while self.running:
+            current_time = time.time()
+            relative_time = round(current_time - start_time, 3)  # Calculate relative time in seconds
             memory_percent = psutil.virtual_memory().percent
-            timestamp = time.time()
+            queue_size = self.task_queue.qsize() + len(self.preempted_tasks)
             
             with self.lock:
                 self.metrics['memory_usage'].append(memory_percent)
-                self.metrics['timestamp'].append(timestamp)
+                self.metrics['timestamp'].append(relative_time)
+                self.metrics['queue_length'].append(queue_size)
             
             time.sleep(0.5)  # Collect metrics every 0.5 seconds
     
@@ -304,7 +324,7 @@ class MLScheduler:
             
             avg_wait_by_priority = {}
             for priority, times in waiting_by_priority.items():
-                avg_wait_by_priority[priority] = sum(times) / len(times) if times else 0
+                avg_wait_by_priority[priority] = round(sum(times) / len(times), 3) if times else 0
             
             # Count tasks by priority
             tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
@@ -315,11 +335,14 @@ class MLScheduler:
                         tasks_by_priority[priority_name] += 1
             
             # Calculate average prediction error with error handling
-            avg_prediction_error = sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']) if self.metrics['prediction_errors'] else 0
+            avg_prediction_error = round(
+                sum(self.metrics['prediction_errors']) / len(self.metrics['prediction_errors']), 
+                3
+            ) if self.metrics['prediction_errors'] else 0
             
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'avg_waiting_time': avg_waiting_time,  # Already using standardized key
+                'avg_waiting_time': round(avg_waiting_time, 3),  # Already using standardized key
                 'avg_waiting_by_priority': avg_wait_by_priority,  # Ensure consistent naming
                 'tasks_by_priority': tasks_by_priority,  # Ensure consistent format
                 'queue_length_history': self.metrics['queue_length'],

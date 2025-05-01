@@ -277,7 +277,7 @@ class MultiProcessor:
             self.metrics['processor_load_balance'] = load_balance
             self.metrics['system_throughput'] = system_throughput
             
-            time.sleep(1.0)  # Collect metrics every second
+            time.sleep(0.5)  # Collect metrics every 0.5 seconds
     
     def get_metrics(self):
         """

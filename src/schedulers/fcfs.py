@@ -47,6 +47,7 @@ class FCFSScheduler:
         """
         self.running = True
         self.current_time = 0
+        start_time = time.time()  # Store real-time start
         
         # Start metrics collection in a separate thread
         metrics_thread = threading.Thread(target=self._collect_metrics)
@@ -69,8 +70,12 @@ class FCFSScheduler:
                     if self.current_time < task.arrival_time:
                         self.current_time = task.arrival_time
                 
-                # Record start time
-                task.start_time = time.time() if not simulation else self.current_time
+                # Record start time (using relative time in simulation mode)
+                if simulation:
+                    task.start_time = self.current_time
+                else:
+                    task.start_time = time.time() - start_time  # Store relative time
+                    
                 self.logger.info(f"Starting execution of {task.id} at time {task.start_time:.2f}")
                 
                 # Execute the task
@@ -83,7 +88,11 @@ class FCFSScheduler:
                     time.sleep(task.service_time)
                 
                 # Record completion time
-                task.completion_time = time.time() if not simulation else self.current_time
+                if simulation:
+                    task.completion_time = self.current_time
+                else:
+                    task.completion_time = time.time() - start_time  # Store relative time
+                    
                 self.logger.info(f"Completed execution of {task.id} at time {task.completion_time:.2f}")
                 
                 # Calculate metrics
@@ -107,13 +116,17 @@ class FCFSScheduler:
     
     def _collect_metrics(self):
         """Collect system metrics during execution"""
+        start_time = time.time()  # Record the absolute start time
+        
         while self.running:
+            current_time = time.time()
+            relative_time = round(current_time - start_time, 3)  # Calculate relative time in seconds
             memory_percent = psutil.virtual_memory().percent
-            timestamp = time.time()
             
             with self.lock:
                 self.metrics['memory_usage'].append(memory_percent)
-                self.metrics['timestamp'].append(timestamp)
+                self.metrics['timestamp'].append(relative_time)  # Store relative time
+                self.metrics['queue_length'].append(self.task_queue.qsize())
             
             time.sleep(0.5)  # Collect metrics every 0.5 seconds
     
@@ -135,7 +148,7 @@ class FCFSScheduler:
             
             avg_waiting_by_priority = {}
             for priority, times in waiting_by_priority.items():
-                avg_waiting_by_priority[priority] = sum(times) / len(times) if times else 0
+                avg_waiting_by_priority[priority] = round(sum(times) / len(times), 3) if times else 0
             
             # Count tasks by priority
             tasks_by_priority = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
@@ -145,11 +158,12 @@ class FCFSScheduler:
                     if priority_name in tasks_by_priority:
                         tasks_by_priority[priority_name] += 1
             
+            # Round timing values for better readability
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'avg_waiting_time': avg_waiting_time,  # Standardized key name
-                'avg_waiting_by_priority': avg_waiting_by_priority,  # Standardized key name
-                'tasks_by_priority': tasks_by_priority,  # Add priority analysis
+                'avg_waiting_time': round(avg_waiting_time, 3),  # Rounded to 3 decimal places
+                'avg_waiting_by_priority': avg_waiting_by_priority,  # Already rounded
+                'tasks_by_priority': tasks_by_priority,
                 'queue_length_history': self.metrics['queue_length'],
                 'memory_usage_history': self.metrics['memory_usage'],
                 'timestamp_history': self.metrics['timestamp']

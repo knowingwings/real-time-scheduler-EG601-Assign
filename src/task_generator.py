@@ -32,14 +32,24 @@ class Task:
     def __str__(self):
         return f"Task {self.id}: Priority={self.priority.name}, Arrival={self.arrival_time:.2f}s, Service={self.service_time:.2f}s"
     
+    
     def calculate_metrics(self):
-        """Calculate waiting time and other metrics once task is processed"""
-        if self.start_time and self.completion_time:
-            self.waiting_time = self.start_time - self.arrival_time
+        """
+        Calculate waiting time and other metrics once task is processed
+        
+        Returns:
+            Dictionary containing timing metrics or None if task processing is incomplete
+        """
+        if self.start_time is not None and self.completion_time is not None:
+            # Both start and completion times are already relative to simulation start
+            self.waiting_time = round(self.start_time - self.arrival_time, 3)
+            turnaround_time = round(self.completion_time - self.arrival_time, 3)
+            response_time = round(self.start_time - self.arrival_time, 3)
+            
             return {
                 'waiting_time': self.waiting_time,
-                'turnaround_time': self.completion_time - self.arrival_time,
-                'response_time': self.start_time - self.arrival_time
+                'turnaround_time': turnaround_time,
+                'response_time': response_time
             }
         return None
 

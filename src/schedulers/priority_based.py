@@ -134,6 +134,7 @@ class PriorityScheduler:
         """
         self.running = True
         self.current_time = 0
+        start_time = time.time()  # Store real-time start
         
         # Start metrics collection in a separate thread
         metrics_thread = threading.Thread(target=self._collect_metrics)
@@ -181,8 +182,12 @@ class PriorityScheduler:
             if preempt_current and self.current_task:
                 self.logger.info(f"Preempting task {self.current_task.id} for task {task.id} with higher priority")
                 # Save the remaining execution time of the current task
-                elapsed = time.time() - self.current_task.start_time if not simulation else self.current_time - self.current_task.start_time
-                self.current_task.service_time -= elapsed
+                if simulation:
+                    elapsed = self.current_time - self.current_task.start_time
+                else:
+                    elapsed = time.time() - start_time - self.current_task.start_time
+                    
+                self.current_task.service_time -= min(elapsed, self.current_task.service_time)  # Avoid negative service time
                 # Add to preempted tasks list
                 self.preempted_tasks.append(self.current_task)
                 self.current_task = None
@@ -192,9 +197,24 @@ class PriorityScheduler:
                 if simulation and self.current_time < task.arrival_time:
                     self.current_time = task.arrival_time
                 
+                # Set waiting time if not already set
+                if task.waiting_time is None:
+                    if simulation:
+                        current_t = self.current_time
+                    else:
+                        current_t = time.time() - start_time
+                        
+                    task.waiting_time = round(max(0, current_t - task.arrival_time), 3)
+                
                 # Set as current task and start execution
                 self.current_task = task
-                task.start_time = time.time() if not simulation else self.current_time
+                
+                # Record start time
+                if simulation:
+                    task.start_time = self.current_time
+                else:
+                    task.start_time = time.time() - start_time
+                    
                 self.logger.info(f"Starting execution of {task.id} at time {task.start_time:.2f}")
                 
                 # Execute the task
@@ -207,7 +227,11 @@ class PriorityScheduler:
                     time.sleep(task.service_time)
                 
                 # Record completion time
-                task.completion_time = time.time() if not simulation else self.current_time
+                if simulation:
+                    task.completion_time = self.current_time
+                else:
+                    task.completion_time = time.time() - start_time
+                    
                 self.logger.info(f"Completed execution of {task.id} at time {task.completion_time:.2f}")
                 
                 # Calculate metrics
@@ -231,13 +255,18 @@ class PriorityScheduler:
     
     def _collect_metrics(self):
         """Collect system metrics during execution"""
+        start_time = time.time()  # Record the absolute start time
+        
         while self.running:
+            current_time = time.time()
+            relative_time = round(current_time - start_time, 3)  # Calculate relative time in seconds
             memory_percent = psutil.virtual_memory().percent
-            timestamp = time.time()
+            queue_size = self.task_queue.qsize() + len(self.preempted_tasks)
             
             with self.lock:
                 self.metrics['memory_usage'].append(memory_percent)
-                self.metrics['timestamp'].append(timestamp)
+                self.metrics['timestamp'].append(relative_time)
+                self.metrics['queue_length'].append(queue_size)
             
             time.sleep(0.5)  # Collect metrics every 0.5 seconds
     
@@ -250,7 +279,10 @@ class PriorityScheduler:
                 priority_tasks = [task for task in self.completed_tasks 
                                 if task.priority == priority and task.waiting_time is not None]
                 if priority_tasks:
-                    waiting_times[priority.name] = sum(t.waiting_time for t in priority_tasks) / len(priority_tasks)
+                    waiting_times[priority.name] = round(
+                        sum(t.waiting_time for t in priority_tasks) / len(priority_tasks), 
+                        3
+                    )
                 else:
                     waiting_times[priority.name] = 0
             
@@ -269,7 +301,7 @@ class PriorityScheduler:
             
             return {
                 'completed_tasks': len(self.completed_tasks),
-                'avg_waiting_time': avg_waiting_time,  # Add standardized overall average
+                'avg_waiting_time': round(avg_waiting_time, 3),  # Add standardized overall average
                 'avg_waiting_by_priority': waiting_times,  # Standardized key name
                 'tasks_by_priority': tasks_by_priority,  # Add priority analysis
                 'queue_length_history': self.metrics['queue_length'],
