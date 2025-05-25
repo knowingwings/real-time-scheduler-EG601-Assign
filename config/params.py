@@ -45,9 +45,28 @@ SIMULATION = {
     'enabled': True,
     'speed_factor': 10.0,  # Higher values = faster simulation
     'run_time': 120,       # Maximum simulation time in seconds
-    'metrics_collection_interval': 0.5,  # How often to collect metrics (seconds)
-    'throughput_smoothing': 0.9,        # Smoothing factor for throughput calculation (0-1)
-    'processor_busy_utilization': 100    # Utilization value when processor is busy (percent)
+    'metrics_collection_interval': 0.1,  # 100ms interval for metrics collection
+    'min_collection_interval': 0.05,     # 50ms minimum between collections
+    'throughput_smoothing': 0.3,         # Smoothing factor for throughput calculation
+    'processor_busy_utilization': 100,   # CPU utilization when processor is busy
+    'validation_thresholds': {
+        'max_waiting_time': 1000000,     # Maximum reasonable waiting time (1000s)
+        'max_queue_length': 1000,        # Maximum reasonable queue length
+        'max_throughput': 1000,          # Maximum tasks per second
+        'min_throughput': 0,             # Minimum tasks per second
+        'max_cpu_usage': 100,            # Maximum CPU usage percentage
+        'min_cpu_usage': 0,              # Minimum CPU usage percentage
+        'max_memory_usage': 100,         # Maximum memory usage percentage
+        'min_memory_usage': 0,           # Minimum memory usage percentage
+    },
+    'metrics_validation': {
+        'require_positive_waiting': True,      # Enforce non-negative waiting times
+        'require_monotonic_timestamps': True,  # Enforce increasing timestamps
+        'normalize_priorities': True,          # Normalize priority ratios
+        'validate_throughput': True,          # Validate throughput calculations
+        'track_inversions': True,             # Track priority inversions
+        'track_inheritance': True,            # Track priority inheritance events
+    }
 }
 
 # Machine Learning Parameters

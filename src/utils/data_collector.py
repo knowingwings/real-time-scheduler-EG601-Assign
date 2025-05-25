@@ -29,7 +29,21 @@ STANDARD_METRICS = {
     'tasks_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0},
     'deadline_tasks': 0,
     'deadline_met': 0,
-    'deadline_miss_rate': 0.0
+    'deadline_miss_rate': 0.0,
+    'deadline_misses': 0,
+    'avg_deadline_margin': 0.0,
+    'queue_length_history': [],
+    'memory_usage_history': [],
+    'cpu_usage_history': [],
+    'timestamp_history': [],
+    'throughput_history': [],
+    'avg_cpu_usage': 0.0,
+    'avg_memory_usage': 0.0,
+    'avg_throughput': 0.0,
+    'priority_inversions': 0,
+    'priority_inheritance_events': 0,
+    'avg_response_time': 0.0,
+    'avg_turnaround_time': 0.0
 }
 
 def ensure_output_dir(base_path='results', experiment_id=None):
@@ -152,167 +166,109 @@ def save_system_info(data_dir):
 def save_task_metrics(completed_tasks, scheduler_name, processor_name, 
                      data_dir, scenario=1, run_number=1, processor_type='single'):
     """
-    Save task metrics to CSV files with updated naming and enhanced data validation
-    
-    Args:
-        completed_tasks: List of completed Task objects
-        scheduler_name: Name of the scheduler used
-        processor_name: Name/identifier of the processor
-        data_dir: Directory path to save data files
-        scenario: Scenario number
-        run_number: Run number
-        processor_type: 'single' or 'multi'
+    Save task metrics to CSV files with validation that only includes actual collected data
     """
     if not completed_tasks:
         logger.warning(f"No completed tasks for {scheduler_name} on {processor_name}")
-        # Create empty placeholder file to indicate the run was attempted
-        scenario_dir = f"{data_dir}/raw/scenario_{scenario}"
-        os.makedirs(scenario_dir, exist_ok=True)
-        run_dir = f"{scenario_dir}/run_{run_number}"
-        os.makedirs(run_dir, exist_ok=True)
-        placeholder_path = f"{run_dir}/{scheduler_name}_{processor_type}_{processor_name.replace(' ', '_')}_tasks_empty.txt"
-        with open(placeholder_path, 'w') as f:
-            f.write(f"No completed tasks for {scheduler_name} on {processor_name}\n")
         return
     
-    # Create data for CSV
+    # Create data for CSV, only including tasks with valid data
     task_data = []
     for task in completed_tasks:
-        # Handle missing attributes safely with defaults
+        # Only include tasks that have the minimum required valid data
+        if (not hasattr(task, 'arrival_time') or 
+            not hasattr(task, 'start_time') or 
+            not hasattr(task, 'completion_time')):
+            continue
+            
+        # Skip tasks with invalid timing data
+        if (np.isnan(task.arrival_time) or np.isinf(task.arrival_time) or
+            np.isnan(task.start_time) or np.isinf(task.start_time) or
+            np.isnan(task.completion_time) or np.isinf(task.completion_time)):
+            continue
+            
         task_dict = {
-            'id': getattr(task, 'id', f"unknown_{len(task_data)}"),
-            'priority': getattr(task.priority, 'name', str(getattr(task, 'priority', 'UNKNOWN'))),
-            'arrival_time': getattr(task, 'arrival_time', 0.0),
-            'start_time': getattr(task, 'start_time', 0.0),
-            'completion_time': getattr(task, 'completion_time', 0.0),
-            'waiting_time': getattr(task, 'waiting_time', 0.0),
-            'service_time': getattr(task, 'service_time', 0.0),
-            'deadline': getattr(task, 'deadline', None)
+            'id': getattr(task, 'id', None),
+            'priority': getattr(task.priority, 'name', None) if hasattr(task, 'priority') else None,
+            'arrival_time': task.arrival_time,
+            'start_time': task.start_time,
+            'completion_time': task.completion_time,
+            'waiting_time': task.completion_time - task.arrival_time if hasattr(task, 'completion_time') else None,
+            'service_time': task.completion_time - task.start_time if hasattr(task, 'completion_time') else None
         }
         
-        # Calculate deadline_met if possible
-        if task_dict['deadline'] is not None and task_dict['completion_time'] is not None:
-            task_dict['deadline_met'] = task_dict['completion_time'] <= task_dict['deadline']
-        else:
-            task_dict['deadline_met'] = None
-        
-        # Validate numeric values
-        for key in ['arrival_time', 'start_time', 'completion_time', 'waiting_time', 'service_time']:
-            if task_dict[key] is not None:
-                # Replace NaN/Inf with 0.0
-                if isinstance(task_dict[key], float) and (np.isnan(task_dict[key]) or np.isinf(task_dict[key])):
-                    task_dict[key] = 0.0
-                    logger.warning(f"Replaced NaN/Inf value in task {task_dict['id']} {key} with 0.0")
+        # Only include deadline info if it exists and is valid
+        if hasattr(task, 'deadline') and task.deadline is not None:
+            if not (np.isnan(task.deadline) or np.isinf(task.deadline)):
+                task_dict['deadline'] = task.deadline
+                task_dict['deadline_met'] = task.completion_time <= task.deadline
         
         task_data.append(task_dict)
     
+    if not task_data:
+        logger.warning(f"No valid task data for {scheduler_name} on {processor_name}")
+        return
+        
     # Create scenario directory path
     scenario_dir = f"{data_dir}/raw/scenario_{scenario}"
     os.makedirs(scenario_dir, exist_ok=True)
-    
-    # Create run directory path within scenario
     run_dir = f"{scenario_dir}/run_{run_number}"
     os.makedirs(run_dir, exist_ok=True)
     
-    # Create file name with more concise components
+    # Save only valid task data
     file_path = f"{run_dir}/{scheduler_name}_{processor_type}_{processor_name.replace(' ', '_')}_tasks.csv"
+    df = pd.DataFrame(task_data)
+    df.to_csv(file_path, index=False)
     
-    # Save as CSV
-    with open(file_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=task_data[0].keys())
-        writer.writeheader()
-        writer.writerows(task_data)
-    
-    logger.info(f"Saved task metrics to {file_path}")
+    logger.info(f"Saved {len(task_data)} valid task metrics to {file_path}")
 
 def save_time_series_metrics(metrics, scheduler_name, processor_name, 
                             data_dir, scenario=1, run_number=1, processor_type='single'):
     """
     Save time series metrics to CSV files with enhanced data validation
-    
-    Args:
-        metrics: Dictionary containing time series metrics
-        scheduler_name: Name of the scheduler used
-        processor_name: Name/identifier of the processor
-        data_dir: Directory path to save data files
-        scenario: Scenario number
-        run_number: Run number
-        processor_type: 'single' or 'multi'
     """
-    # Create scenario directory path in raw data folder
-    scenario_dir = f"{data_dir}/raw/scenario_{scenario}"
-    os.makedirs(scenario_dir, exist_ok=True)
-    
-    # Create run directory path within scenario
-    run_dir = f"{scenario_dir}/run_{run_number}"
-    os.makedirs(run_dir, exist_ok=True)
-    
-    # Get time series data with validation
+    # Get time series data
     timestamp_history = metrics.get('timestamp_history', [])
     queue_length_history = metrics.get('queue_length_history', [])
     memory_usage_history = metrics.get('memory_usage_history', [])
+    cpu_usage_history = metrics.get('cpu_usage_history', [])
+    throughput_history = metrics.get('throughput_history', [])
     
-    # Validate data - remove NaN/inf values
-    timestamp_history = [t for t in timestamp_history if isinstance(t, (int, float)) and not np.isnan(t) and not np.isinf(t)]
-    queue_length_history = [q for q in queue_length_history if isinstance(q, (int, float)) and not np.isnan(q) and not np.isinf(q)]
-    memory_usage_history = [m for m in memory_usage_history if isinstance(m, (int, float)) and not np.isnan(m) and not np.isinf(m)]
-    
-    # Create a DataFrame for the time series data
-    data = {}
-    
-    # Add timestamps - already relative to simulation start
-    if timestamp_history:
-        data['time'] = timestamp_history
-    else:
-        # Generate placeholder timestamps if missing
-        logger.warning(f"Missing timestamp_history for {scheduler_name} on {processor_name}, generating placeholders")
-        data['time'] = list(range(max(len(queue_length_history), len(memory_usage_history))))
-    
-    # Add queue length history
-    if queue_length_history:
-        # Ensure same length as time
-        if 'time' in data:
-            if len(queue_length_history) > len(data['time']):
-                queue_length_history = queue_length_history[:len(data['time'])]
-            elif len(queue_length_history) < len(data['time']):
-                # Pad with last value or zeros
-                if queue_length_history:
-                    last_value = queue_length_history[-1]
-                    queue_length_history.extend([last_value] * (len(data['time']) - len(queue_length_history)))
-                else:
-                    queue_length_history = [0] * len(data['time'])
+    # If we don't have valid timestamp data, we can't create valid time series
+    if not timestamp_history:
+        logger.warning(f"No timestamp data for {scheduler_name} on {processor_name}, skipping time series metrics")
+        return
         
+    # Create data frame with only valid data points
+    data = {'time': timestamp_history}
+    
+    # Only include metrics that have data and align with timestamps
+    if queue_length_history and len(queue_length_history) == len(timestamp_history):
         data['queue_length'] = queue_length_history
-    
-    # Add memory usage history
-    if memory_usage_history:
-        # Ensure same length as time
-        if 'time' in data:
-            if len(memory_usage_history) > len(data['time']):
-                memory_usage_history = memory_usage_history[:len(data['time'])]
-            elif len(memory_usage_history) < len(data['time']):
-                # Pad with last value or zeros
-                if memory_usage_history:
-                    last_value = memory_usage_history[-1]
-                    memory_usage_history.extend([last_value] * (len(data['time']) - len(memory_usage_history)))
-                else:
-                    memory_usage_history = [0] * len(data['time'])
-        
+    if memory_usage_history and len(memory_usage_history) == len(timestamp_history):
         data['memory_usage'] = memory_usage_history
+    if cpu_usage_history and len(cpu_usage_history) == len(timestamp_history):
+        data['cpu_usage'] = cpu_usage_history
+    if throughput_history and len(throughput_history) == len(timestamp_history):
+        data['throughput'] = throughput_history
     
-    # Create file name with more concise components
+    # Clean up any NaN/Inf values by dropping those rows
+    df = pd.DataFrame(data)
+    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+    
+    if df.empty:
+        logger.warning(f"No valid time series data for {scheduler_name} on {processor_name}")
+        return
+    
+    # Save to CSV
+    scenario_dir = f"{data_dir}/raw/scenario_{scenario}"
+    os.makedirs(scenario_dir, exist_ok=True)
+    run_dir = f"{scenario_dir}/run_{run_number}"
+    os.makedirs(run_dir, exist_ok=True)
+    
     file_path = f"{run_dir}/{scheduler_name}_{processor_type}_{processor_name.replace(' ', '_')}_timeseries.csv"
-    
-    # Save as CSV if we have any data
-    if data and 'time' in data:
-        df = pd.DataFrame(data)
-        df.to_csv(file_path, index=False)
-        logger.info(f"Saved time series metrics to {file_path}")
-    else:
-        logger.warning(f"No time series data available for {scheduler_name} on {processor_name}")
-        # Create empty placeholder file
-        with open(file_path.replace('.csv', '_empty.txt'), 'w') as f:
-            f.write(f"No time series data available for {scheduler_name} on {processor_name}\n")
+    df.to_csv(file_path, index=False)
+    logger.info(f"Saved time series metrics to {file_path}")
 
 def save_scheduler_metrics(metrics, scheduler_name, processor_name, 
                           data_dir, scenario=1, run_number=1, processor_type='single'):
@@ -510,114 +466,106 @@ def create_scenario_descriptions(data_dir):
 
 def combine_run_metrics(data_dir):
     """
-    Combine metrics from all runs into summary files for easier analysis
+    Combine metrics from all runs with enhanced validation and error handling
     
     Args:
         data_dir: Directory containing experiment data
     """
-    logger.info(f"Combining run metrics for data in {data_dir}")
+    metrics_by_scheduler = {}
     
-    # Get all processed metrics files
-    metrics_files = []
+    # Process all metrics files
     for scenario_dir in os.listdir(f"{data_dir}/processed"):
         if not scenario_dir.startswith("scenario_"):
             continue
             
-        scenario_path = os.path.join(data_dir, "processed", scenario_dir)
-        if not os.path.isdir(scenario_path):
-            continue
-            
-        for run_dir in os.listdir(scenario_path):
+        for run_dir in os.listdir(os.path.join(data_dir, "processed", scenario_dir)):
             if not run_dir.startswith("run_"):
                 continue
                 
-            run_path = os.path.join(scenario_path, run_dir)
-            if not os.path.isdir(run_path):
-                continue
-                
-            # Find all metrics JSON files in this run
+            run_path = os.path.join(data_dir, "processed", scenario_dir, run_dir)
             for filename in os.listdir(run_path):
-                if filename.endswith("_metrics.json"):
+                if not filename.endswith("_metrics.json"):
+                    continue
+                    
+                try:
                     file_path = os.path.join(run_path, filename)
-                    metrics_files.append(file_path)
+                    with open(file_path, 'r') as f:
+                        metrics = json.load(f)
+                    
+                    # Extract metadata
+                    scheduler_name = metrics.get('scheduler_name', 'unknown')
+                    processor_type = metrics.get('processor_type', 'unknown')
+                    scenario = metrics.get('scenario', 0)
+                    
+                    # Create key for grouping
+                    key = f"{scheduler_name}_{processor_type}_scenario_{scenario}"
+                    if key not in metrics_by_scheduler:
+                        metrics_by_scheduler[key] = []
+                    
+                    # Validate and standardize metrics before adding
+                    validated_metrics = sanitize_metrics(metrics)
+                    
+                    # Ensure all standard metrics exist
+                    for metric_key, default_value in STANDARD_METRICS.items():
+                        if metric_key not in validated_metrics:
+                            validated_metrics[metric_key] = default_value
+                            logger.warning(f"Added missing metric {metric_key} with default value")
+                    
+                    metrics_by_scheduler[key].append(validated_metrics)
+                except Exception as e:
+                    logger.error(f"Error processing {file_path}: {str(e)}")
+                    continue
     
-    # Group by scheduler and processor type - using a regular dict instead of defaultdict to fix the append error
-    metrics_by_scheduler = {}
-    
-    for file_path in metrics_files:
-        try:
-            with open(file_path, 'r') as f:
-                metrics = json.load(f)
-                
-            scheduler_name = metrics.get('scheduler_name', 'unknown')
-            processor_type = metrics.get('processor_type', 'unknown')
-            scenario = metrics.get('scenario', 0)
-            
-            # Organize by scheduler, processor type, and scenario
-            key = f"{scheduler_name}_{processor_type}_scenario_{scenario}"
-            
-            # Initialize list if key doesn't exist
-            if key not in metrics_by_scheduler:
-                metrics_by_scheduler[key] = []
-                
-            metrics_by_scheduler[key].append(metrics)
-        except Exception as e:
-            logger.error(f"Error loading metrics from {file_path}: {str(e)}")
-    
-    # Create summary directory
+    # Create summaries with enhanced error handling
     summary_dir = os.path.join(data_dir, "summary")
     os.makedirs(summary_dir, exist_ok=True)
     
-    # Calculate average metrics for each group
     for key, metrics_list in metrics_by_scheduler.items():
         if not metrics_list:
-            logger.warning(f"No metrics found for {key}")
+            logger.warning(f"No valid metrics found for {key}")
             continue
-            
-        # Initialize with metadata from first metrics
-        summary = {
-            'scheduler_name': metrics_list[0].get('scheduler_name', 'unknown'),
-            'processor_type': metrics_list[0].get('processor_type', 'unknown'),
-            'scenario': metrics_list[0].get('scenario', 0),
-            'run_count': len(metrics_list),
-            'metrics': {}
-        }
         
-        # Collect all scalar metrics
-        scalar_metrics = {}
-        
-        for metrics in metrics_list:
-            for key, value in metrics.items():
-                # Skip metadata and non-scalar values
-                if key in ['scheduler_name', 'processor_name', 'processor_type', 'scenario', 'run_number']:
-                    continue
-                    
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    if key not in scalar_metrics:
-                        scalar_metrics[key] = []
-                    scalar_metrics[key].append(value)
-        
-        # Calculate statistics for each metric
-        for key, values in scalar_metrics.items():
-            if not values:
-                continue
-                
-            # Filter out NaN values
-            valid_values = [v for v in values if not np.isnan(v) and not np.isinf(v)]
-            
-            if not valid_values:
-                continue
-                
-            summary['metrics'][key] = {
-                'mean': float(np.mean(valid_values)),
-                'min': float(np.min(valid_values)),
-                'max': float(np.max(valid_values)),
-                'std': float(np.std(valid_values)) if len(valid_values) > 1 else 0.0
+        try:
+            # Initialize summary with metadata
+            summary = {
+                'scheduler_name': metrics_list[0].get('scheduler_name', 'unknown'),
+                'processor_type': metrics_list[0].get('processor_type', 'unknown'),
+                'scenario': metrics_list[0].get('scenario', 0),
+                'run_count': len(metrics_list),
+                'metrics': {}
             }
-        
-        # Save summary
-        summary_path = os.path.join(summary_dir, f"{key}_summary.json")
-        save_json(summary, summary_path)
-        logger.info(f"Saved metrics summary to {summary_path}")
+            
+            # Calculate statistics for scalar metrics
+            scalar_metrics = {}
+            for metrics in metrics_list:
+                for metric_key, value in metrics.items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        if metric_key not in scalar_metrics:
+                            scalar_metrics[metric_key] = []
+                        scalar_metrics[metric_key].append(value)
+            
+            # Process scalar metrics with validation
+            for metric_key, values in scalar_metrics.items():
+                valid_values = [v for v in values if not np.isnan(v) and not np.isinf(v)]
+                
+                if not valid_values:
+                    logger.warning(f"No valid values for {metric_key} in {key}")
+                    continue
+                
+                summary['metrics'][metric_key] = {
+                    'mean': float(np.mean(valid_values)),
+                    'min': float(np.min(valid_values)),
+                    'max': float(np.max(valid_values)),
+                    'std': float(np.std(valid_values)) if len(valid_values) > 1 else 0.0,
+                    'samples': len(valid_values)
+                }
+            
+            # Save summary
+            summary_path = os.path.join(summary_dir, f"{key}_summary.json")
+            save_json(summary, summary_path)
+            logger.info(f"Saved metrics summary to {summary_path}")
+            
+        except Exception as e:
+            logger.error(f"Error creating summary for {key}: {str(e)}")
     
-    logger.info(f"Completed combining run metrics into summary files")
+    logger.info("Completed combining run metrics with validation")

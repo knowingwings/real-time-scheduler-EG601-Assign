@@ -41,6 +41,9 @@ class SingleProcessor:
             'throughput': [],  # Tasks per second
             'utilisation': []  # Percentage of time the processor is busy
         }
+        self.metrics_lock = threading.Lock()
+        self.last_metrics_time = time.time()
+        self.last_completed_count = 0
     
     def add_tasks(self, tasks):
         """
@@ -68,6 +71,11 @@ class SingleProcessor:
         metrics_thread = threading.Thread(target=self._collect_metrics)
         metrics_thread.daemon = True
         metrics_thread.start()
+        
+        # Start resource monitoring
+        resource_monitor_thread = threading.Thread(target=self._monitor_resources)
+        resource_monitor_thread.daemon = True
+        resource_monitor_thread.start()
         
         # Start scheduler in a separate thread
         scheduler_thread = threading.Thread(target=self._run_scheduler)
@@ -217,49 +225,93 @@ class SingleProcessor:
                 print(f"Error collecting metrics: {str(e)}")
                 time.sleep(SIMULATION['metrics_collection_interval'])  # Continue collecting
 
+    def _monitor_resources(self):
+        """Monitor CPU and memory utilization"""
+        while self.is_running:
+            try:
+                # Get process-specific CPU usage
+                process = psutil.Process()
+                cpu_percent = process.cpu_percent(interval=0.1)
+                memory_percent = process.memory_percent()
+                
+                with self.metrics_lock:
+                    # Append valid measurements only
+                    if 0 <= cpu_percent <= 100:
+                        self.metrics['cpu_usage'].append(cpu_percent)
+                    if 0 <= memory_percent <= 100:
+                        self.metrics['memory_usage'].append(memory_percent)
+                    
+                    # Calculate throughput for current interval
+                    current_time = time.time()
+                    elapsed = current_time - self.last_metrics_time
+                    completed_since_last = len(self.scheduler.completed_tasks) - self.last_completed_count
+                    
+                    if elapsed >= 0.1:  # Minimum 100ms interval
+                        throughput = completed_since_last / elapsed
+                        if throughput >= 0:  # Only record valid throughput
+                            self.metrics['throughput'].append(throughput)
+                            
+                        # Update counters
+                        self.last_metrics_time = current_time
+                        self.last_completed_count = len(self.scheduler.completed_tasks)
+                
+                # Sleep briefly to prevent excessive CPU usage
+                time.sleep(0.1)
+                
+            except Exception as e:
+                self.logger.error(f"Error monitoring resources: {e}")
+                time.sleep(0.1)
+
     def get_metrics(self):
-        """Get processor metrics combined with scheduler metrics with improved error handling"""
-        try:
+        """Get processor metrics with validation"""
+        with self.metrics_lock:
+            # Calculate CPU usage average
+            cpu_usage = self.metrics.get('cpu_usage', [])
+            avg_cpu_usage = (sum(cpu_usage) / len(cpu_usage) 
+                           if cpu_usage else 0)
+            
+            # Calculate memory usage average
+            memory_usage = self.metrics.get('memory_usage', [])
+            avg_memory_usage = (sum(memory_usage) / len(memory_usage) 
+                              if memory_usage else 0)
+            
+            # Calculate throughput metrics
+            throughput = self.metrics.get('throughput', [])
+            avg_throughput = (sum(throughput) / len(throughput) 
+                            if throughput else 0)
+            
+            # Get scheduler metrics
             scheduler_metrics = self.scheduler.get_metrics()
-        except Exception as e:
-            # If scheduler metrics fails, create an empty dict
-            scheduler_metrics = {
-                'completed_tasks': 0,
-                'avg_waiting_time': 0.0,
-                'avg_waiting_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0},
-                'tasks_by_priority': {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            
+            # Combine and validate metrics
+            metrics = {
+                'name': self.name,
+                'avg_cpu_usage': round(max(0, min(100, avg_cpu_usage)), 1),
+                'avg_memory_usage': round(max(0, min(100, avg_memory_usage)), 1),
+                'avg_throughput': round(max(0, avg_throughput), 3),
+                'avg_utilisation': round(max(0, min(100, avg_cpu_usage)), 1),
+                
+                # Include history data
+                'cpu_usage_history': [round(max(0, min(100, x)), 1) for x in cpu_usage],
+                'memory_usage_history': [round(max(0, min(100, x)), 1) for x in memory_usage],
+                'timestamp_history': self.metrics.get('timestamp', []),
+                'throughput_history': [round(max(0, x), 3) for x in throughput],
+                
+                # Include scheduler metrics with validation
+                'completed_tasks': max(0, scheduler_metrics.get('completed_tasks', 0)),
+                'avg_waiting_time': max(0, scheduler_metrics.get('avg_waiting_time', 0)),
+                'avg_completion_time': max(0, scheduler_metrics.get('avg_completion_time', 0)),
+                'avg_waiting_by_priority': {
+                    k: max(0, v) for k, v in scheduler_metrics.get('avg_waiting_by_priority', {}).items()
+                },
+                'tasks_by_priority': {
+                    k: max(0, v) for k, v in scheduler_metrics.get('tasks_by_priority', {}).items()
+                }
             }
-        
-        # Ensure metrics dictionary has all required keys
-        if not all(key in self.metrics for key in ['cpu_usage', 'memory_usage', 'timestamp', 'throughput']):
-            self.metrics = {
-                'cpu_usage': [0],
-                'memory_usage': [0],
-                'timestamp': [time.time()],
-                'throughput': [0],
-                'utilisation': [0]
-            }
-        
-        # Calculate average CPU usage and memory usage safely
-        avg_cpu = sum(self.metrics['cpu_usage']) / max(len(self.metrics['cpu_usage']), 1)
-        avg_memory = sum(self.metrics['memory_usage']) / max(len(self.metrics['memory_usage']), 1)
-        avg_throughput = sum(self.metrics['throughput']) / max(len(self.metrics['throughput']), 1)
-        avg_utilisation = sum(self.metrics['utilisation']) / max(len(self.metrics['utilisation']), 1)
-        
-        # Create processor metrics
-        processor_metrics = {
-            'name': self.name,
-            'avg_cpu_usage': avg_cpu,
-            'avg_memory_usage': avg_memory,
-            'avg_throughput': avg_throughput,
-            'avg_utilisation': avg_utilisation,
-            'cpu_usage_history': self.metrics['cpu_usage'],
-            'memory_usage_history': self.metrics['memory_usage'],
-            'timestamp_history': self.metrics['timestamp'],
-            'throughput_history': self.metrics['throughput']
-        }
-        
-        # Combine processor and scheduler metrics
-        combined_metrics = {**processor_metrics, **scheduler_metrics}
-        
-        return combined_metrics
+            
+            # Add additional scheduler-specific metrics if available
+            for key in ['priority_inversions', 'deadline_miss_rate', 'prediction_errors']:
+                if key in scheduler_metrics:
+                    metrics[key] = max(0, scheduler_metrics[key])
+            
+            return metrics

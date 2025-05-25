@@ -31,7 +31,7 @@ from config.params import TASK_CONFIG, SIMULATION
 
 # Import analysis and visualization modules
 import analysis
-import visualise
+from src.utils import visualize as visualise  # Fixed import to match actual filename
 
 # Configure logging
 logging.basicConfig(
@@ -503,4 +503,4 @@ def main():
         logger.error("No experiment directory was created. No results to analyze.")
 
 if __name__ == "__main__":
-    main()  
+    main()

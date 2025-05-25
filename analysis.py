@@ -559,18 +559,11 @@ def analyze_ml_performance(all_results: Dict[str, Dict[str, List[Dict]]]) -> Dic
     return ml_performance
 
 def perform_statistical_validation(all_results: Dict[str, Dict[str, List[Dict]]]) -> Dict:
-    """
-    Perform statistical validation of results
-    
-    Args:
-        all_results: Dictionary containing results for all schedulers
-        
-    Returns:
-        Dictionary containing statistical validation results
-    """
+    """Perform statistical validation with improved confidence interval calculation"""
     statistical_validation = {
         'waiting_time_confidence_intervals': {},
-        'significance_tests': {}
+        'significance_tests': {},
+        'sample_sizes': {}
     }
     
     # Extract waiting times by scheduler and priority
@@ -582,69 +575,66 @@ def perform_statistical_validation(all_results: Dict[str, Dict[str, List[Dict]]]
             'MEDIUM': [],
             'LOW': []
         }
+        statistical_validation['sample_sizes'][scheduler_type] = len(processor_results.get('single', []))
         
         for metrics in processor_results.get('single', []):
             if 'avg_waiting_by_priority' in metrics:
                 for priority, value in metrics['avg_waiting_by_priority'].items():
-                    if priority in waiting_times[scheduler_type]:
+                    if priority in waiting_times[scheduler_type] and value is not None:
                         waiting_times[scheduler_type][priority].append(value)
     
-    # Calculate 95% confidence intervals
+    # Calculate confidence intervals with minimum sample size check
+    min_samples_required = 5  # Minimum samples for valid statistical analysis
+    
     for scheduler_type, priority_times in waiting_times.items():
         statistical_validation['waiting_time_confidence_intervals'][scheduler_type] = {}
         
         for priority, times in priority_times.items():
-            if times and len(times) > 1:
+            if len(times) >= min_samples_required:
                 mean = np.mean(times)
-                ci = stats.t.interval(0.95, len(times)-1, loc=mean, scale=stats.sem(times))
-                margin = ci[1] - mean
-                statistical_validation['waiting_time_confidence_intervals'][scheduler_type][priority] = {
-                    'mean': mean,
-                    'margin': margin,
-                    'lower': ci[0],
-                    'upper': ci[1]
-                }
+                std_error = stats.sem(times)
+                if std_error:  # Avoid division by zero
+                    ci = stats.t.interval(0.95, len(times)-1, loc=mean, scale=std_error)
+                    margin = ci[1] - mean
+                    statistical_validation['waiting_time_confidence_intervals'][scheduler_type][priority] = {
+                        'mean': mean,
+                        'margin': margin,
+                        'lower': ci[0],
+                        'upper': ci[1],
+                        'sample_size': len(times)
+                    }
+            else:
+                logger.warning(f"Insufficient samples ({len(times)}) for {scheduler_type} {priority} confidence interval")
     
     # Perform significance tests between schedulers
-    # Compare FCFS with other schedulers
-    if 'fcfs' in waiting_times:
-        fcfs_high = waiting_times['fcfs']['HIGH']
+    if 'ml' in waiting_times and len(waiting_times) > 1:
+        ml_results = waiting_times['ml']
+        statistical_validation['significance_tests']['ml_comparison'] = {}
         
-        for scheduler_type in ['edf', 'priority', 'ml']:
-            if scheduler_type in waiting_times:
-                scheduler_high = waiting_times[scheduler_type]['HIGH']
+        for other_scheduler, other_results in waiting_times.items():
+            if other_scheduler != 'ml':
+                scheduler_tests = {}
                 
-                if fcfs_high and scheduler_high and len(fcfs_high) > 1 and len(scheduler_high) > 1:
-                    # Perform t-test
-                    t_stat, p_value = stats.ttest_ind(fcfs_high, scheduler_high, equal_var=False)
+                for priority in ['HIGH', 'MEDIUM', 'LOW']:
+                    ml_times = ml_results[priority]
+                    other_times = other_results[priority]
                     
-                    if 'fcfs_vs_others' not in statistical_validation['significance_tests']:
-                        statistical_validation['significance_tests']['fcfs_vs_others'] = {}
-                    
-                    statistical_validation['significance_tests']['fcfs_vs_others'][scheduler_type] = {
-                        't_statistic': t_stat,
-                        'p_value': p_value,
-                        'significant': p_value < 0.05
-                    }
-    
-    # Compare Priority vs ML
-    if 'priority' in waiting_times and 'ml' in waiting_times:
-        for priority in ['HIGH', 'MEDIUM', 'LOW']:
-            priority_times = waiting_times['priority'][priority]
-            ml_times = waiting_times['ml'][priority]
-            
-            if priority_times and ml_times and len(priority_times) > 1 and len(ml_times) > 1:
-                # Perform t-test
-                t_stat, p_value = stats.ttest_ind(priority_times, ml_times, equal_var=False)
+                    if len(ml_times) >= min_samples_required and len(other_times) >= min_samples_required:
+                        t_stat, p_value = stats.ttest_ind(ml_times, other_times, equal_var=False)
+                        effect_size = (np.mean(ml_times) - np.mean(other_times)) / np.std(ml_times + other_times)
+                        
+                        scheduler_tests[priority] = {
+                            't_statistic': float(t_stat),
+                            'p_value': float(p_value),
+                            'effect_size': float(effect_size),
+                            'significant': p_value < 0.05,
+                            'sample_sizes': {
+                                'ml': len(ml_times),
+                                other_scheduler: len(other_times)
+                            }
+                        }
                 
-                if 'priority_vs_ml' not in statistical_validation['significance_tests']:
-                    statistical_validation['significance_tests']['priority_vs_ml'] = {}
-                
-                statistical_validation['significance_tests']['priority_vs_ml'][priority] = {
-                    't_statistic': t_stat,
-                    'p_value': p_value,
-                    'significant': p_value < 0.05
-                }
+                statistical_validation['significance_tests']['ml_comparison'][other_scheduler] = scheduler_tests
     
     return statistical_validation
 

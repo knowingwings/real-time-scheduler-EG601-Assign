@@ -146,20 +146,28 @@ class FCFSScheduler:
             self.timestamp_history = []# Add this method to each scheduler class to standardize metrics collection
     
     def _collect_metrics(self):
-        """Collect system metrics during execution"""
-        start_time = time.time()  # Record the absolute start time
+        """Collect only real system metrics during execution"""
+        logger.debug("Starting metrics collection for FCFS scheduler")
         
         while self.running:
-            current_time = time.time()
-            relative_time = round(current_time - start_time, 3)  # Calculate relative time in seconds
-            memory_percent = psutil.virtual_memory().percent
+            try:
+                current_time = time.time()
+                relative_time = round(current_time - self.start_time, 3)
+                
+                with self.lock:
+                    # Only collect real measurements
+                    memory_percent = psutil.virtual_memory().percent
+                    queue_size = self.task_queue.qsize()
+                    
+                    # Only append actual measurements
+                    self.metrics['timestamp'].append(relative_time)
+                    self.metrics['memory_usage'].append(memory_percent)
+                    self.metrics['queue_length'].append(queue_size)
             
-            with self.lock:
-                self.metrics['memory_usage'].append(memory_percent)
-                self.metrics['timestamp'].append(relative_time)  # Store relative time
-                self.metrics['queue_length'].append(self.task_queue.qsize())
+            except Exception as e:
+                logger.error(f"Error collecting metrics: {str(e)}")
             
-            time.sleep(0.5)  # Collect metrics every 0.5 seconds
+            time.sleep(0.5)
     
     def get_metrics(self):
         """Get execution metrics"""
