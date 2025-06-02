@@ -18,8 +18,8 @@ from enum import Enum
 import matplotlib.pyplot as plt
 import seaborn as sns # Not explicitly used by plan changes, but was in original
 from collections import deque
-import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog, messagebox
+#import tkinter as tk
+#from tkinter import ttk, scrolledtext, filedialog, messagebox
 import pickle
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
