@@ -1,0 +1,17 @@
+# Real-Time Task Scheduling System Requirements
+# For Raspberry Pi 3 - Python 3.7+
+
+# Scientific Computing
+numpy>=1.22.0                                              
+pandas>=1.3.5  # Data manipulation and analysis
+
+# System Monitoring
+psutil==5.9.5  # Process and system utilities
+
+# Visualization
+matplotlib>=3.5.3  # Plotting library
+seaborn==0.12.2  # Statistical data visualization
+
+# Machine Learning
+scikit-learn>=1.0.2  # ML algorithms (LinearRegression, DecisionTree)
+scipy>=1.7.3  # Scientific computing (dependency of scikit-learn)
