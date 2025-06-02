@@ -1,0 +1,462 @@
+# Comprehensive Testing Suite Results
+Generated: 2025-06-02 08:27:58
+
+## Executive Summary
+### Best Performers by Metric (Baseline Scenario):
+- **Average Waiting Time**: Priority (177.259)
+- **P99 Waiting Time**: FCFS (398.234)
+- **CPU Utilization**: FCFS (49.964)
+- **Throughput**: FCFS (0.102)
+
+## Detailed Scenario Results
+
+### Scenario: Baseline Test
+*Standard configuration baseline*
+*Processors: 1*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |       195.78 |       360.69 |       398.23 |         50.0 |             0.10 |
+| EDF               |       190.32 |       364.80 |       405.23 |         49.3 |             0.10 |
+| Priority          |       177.26 |       366.79 |       409.28 |         49.1 |             0.10 |
+| ML-Linear         |       195.52 |       366.60 |       405.30 |         49.3 |             0.10 |
+| ML-DecisionTree   |       199.87 |       367.38 |       405.08 |         49.3 |             0.10 |
+| ML-QLearning      |       200.40 |       363.98 |       404.44 |         49.2 |             0.10 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: High Load Test
+*Testing under high task arrival rate*
+*Processors: 1*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |       224.32 |       405.71 |       450.24 |         49.2 |             0.10 |
+| EDF               |       206.32 |       405.95 |       449.70 |         49.1 |             0.10 |
+| Priority          |       194.63 |       394.32 |       459.45 |         49.2 |             0.10 |
+| ML-Linear         |       224.57 |       406.36 |       450.29 |         49.2 |             0.10 |
+| ML-DecisionTree   |       225.95 |       407.70 |       452.39 |         49.0 |             0.10 |
+| ML-QLearning      |       226.09 |       410.60 |       454.94 |         48.9 |             0.10 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: Dual-Processor Test
+*Testing dual-processor efficiency*
+*Processors: 2*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |        81.98 |       150.42 |       164.76 |         47.9 |             0.20 |
+| EDF               |        78.27 |       150.72 |       166.64 |         48.0 |             0.20 |
+| Priority          |        72.32 |       165.03 |       172.81 |         48.0 |             0.20 |
+| ML-Linear         |        77.21 |       143.09 |       158.85 |         49.4 |             0.20 |
+| ML-DecisionTree   |        83.67 |       154.80 |       165.05 |         48.5 |             0.20 |
+| ML-QLearning      |        81.93 |       147.86 |       165.09 |         48.0 |             0.20 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: Quad-Processor Test
+*Testing quad-processor efficiency*
+*Processors: 4*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |        24.30 |        43.73 |        46.27 |         45.3 |             0.37 |
+| EDF               |        23.13 |        42.15 |        52.27 |         44.2 |             0.36 |
+| Priority          |        19.14 |        59.48 |        76.40 |         45.5 |             0.37 |
+| ML-Linear         |        21.33 |        40.87 |        63.23 |         47.3 |             0.39 |
+| ML-DecisionTree   |        24.83 |        61.39 |        67.95 |         46.6 |             0.38 |
+| ML-QLearning      |        24.50 |        45.88 |        52.47 |         46.1 |             0.38 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: High Priority Dominant
+*Testing with majority high-priority tasks*
+*Processors: 2*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |        63.64 |       110.73 |       116.91 |         47.3 |             0.23 |
+| EDF               |        61.14 |       109.76 |       118.01 |         46.4 |             0.23 |
+| Priority          |        50.91 |       120.79 |       165.79 |         46.4 |             0.23 |
+| ML-Linear         |        51.97 |       103.62 |       119.35 |         51.2 |             0.25 |
+| ML-DecisionTree   |        55.47 |       115.11 |       137.68 |         49.1 |             0.24 |
+| ML-QLearning      |        60.23 |       104.44 |       118.54 |         49.1 |             0.24 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: Low Priority Dominant
+*Testing with majority low-priority tasks*
+*Processors: 2*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |        73.40 |       119.65 |       129.30 |         48.1 |             0.14 |
+| EDF               |        73.37 |       121.56 |       130.90 |         48.0 |             0.14 |
+| Priority          |        73.14 |       120.33 |       130.85 |         47.7 |             0.14 |
+| ML-Linear         |        65.30 |       195.64 |       254.87 |         49.6 |             0.15 |
+| ML-DecisionTree   |        72.27 |       127.58 |       136.77 |         48.7 |             0.14 |
+| ML-QLearning      |        73.55 |       121.93 |       149.12 |         48.7 |             0.14 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: Extreme Service Times
+*Testing with extended service times*
+*Processors: 1*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |       453.17 |       838.49 |       894.91 |         49.3 |             0.05 |
+| EDF               |       406.84 |       780.31 |       884.43 |         49.3 |             0.05 |
+| Priority          |       361.09 |       781.48 |       887.66 |         49.4 |             0.05 |
+| ML-Linear         |       451.56 |       836.29 |       892.10 |         49.4 |             0.05 |
+| ML-DecisionTree   |       447.95 |       824.08 |       879.61 |         50.1 |             0.05 |
+| ML-QLearning      |       453.64 |       836.28 |       895.56 |         49.3 |             0.05 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+
+
+### Scenario: Stress Test
+*Stress testing with 100 tasks*
+*Processors: 1*
+
+| Scheduler         | Avg Wait (s) | P90 Wait (s) | P99 Wait (s) | CPU Util (%) | Throughput (t/s) |
+|-------------------|--------------|--------------|--------------|--------------|------------------|
+| FCFS              |       394.94 |       693.41 |       745.80 |         49.7 |             0.10 |
+| EDF               |       386.10 |       700.87 |       756.40 |         49.1 |             0.10 |
+| Priority          |       322.92 |       773.24 |       822.87 |         49.3 |             0.10 |
+| ML-Linear         |       276.27 |       656.53 |       725.54 |         53.2 |             0.11 |
+| ML-DecisionTree   |       361.62 |       684.22 |       736.50 |         50.1 |             0.10 |
+| ML-QLearning      |       385.58 |       681.63 |       733.16 |         50.1 |             0.10 |
+
+**Statistical Significance (p < 0.05 for waiting time difference):**
+- FCFS_vs_Priority: p=0.0376, mean diff=72.02s
+- FCFS_vs_ML-Linear: p=0.0004, mean diff=118.67s
+- EDF_vs_ML-Linear: p=0.0011, mean diff=109.83s
+- ML-Linear_vs_ML-DecisionTree: p=0.0112, mean diff=-85.36s
+- ML-Linear_vs_ML-QLearning: p=0.0009, mean diff=-109.31s
+
+## Priority-Specific Performance
+
+### Scenario: Baseline Test
+
+**High Priority Tasks:**
+- FCFS: avg_wait=133.22s, p90_wait=213.99s
+- EDF: avg_wait=105.30s, p90_wait=186.89s
+- Priority: avg_wait=60.11s, p90_wait=93.18s
+- ML-Linear: avg_wait=128.46s, p90_wait=205.68s
+- ML-DecisionTree: avg_wait=136.39s, p90_wait=219.19s
+- ML-QLearning: avg_wait=141.02s, p90_wait=203.07s
+
+**Medium Priority Tasks:**
+- FCFS: avg_wait=237.01s, p90_wait=391.92s
+- EDF: avg_wait=233.49s, p90_wait=383.36s
+- Priority: avg_wait=195.29s, p90_wait=254.25s
+- ML-Linear: avg_wait=234.33s, p90_wait=383.85s
+- ML-DecisionTree: avg_wait=241.62s, p90_wait=399.10s
+- ML-QLearning: avg_wait=240.20s, p90_wait=392.77s
+
+**Low Priority Tasks:**
+- FCFS: avg_wait=238.43s, p90_wait=370.02s
+- EDF: avg_wait=274.01s, p90_wait=376.77s
+- Priority: avg_wait=375.49s, p90_wait=403.53s
+- ML-Linear: avg_wait=252.01s, p90_wait=389.52s
+- ML-DecisionTree: avg_wait=243.32s, p90_wait=376.66s
+- ML-QLearning: avg_wait=239.57s, p90_wait=363.98s
+
+
+### Scenario: High Priority Dominant
+
+**High Priority Tasks:**
+- FCFS: avg_wait=69.55s, p90_wait=110.53s
+- EDF: avg_wait=62.20s, p90_wait=108.89s
+- Priority: avg_wait=25.37s, p90_wait=43.48s
+- ML-Linear: avg_wait=50.87s, p90_wait=101.90s
+- ML-DecisionTree: avg_wait=54.49s, p90_wait=113.42s
+- ML-QLearning: avg_wait=65.16s, p90_wait=103.36s
+
+**Medium Priority Tasks:**
+- FCFS: avg_wait=42.77s, p90_wait=91.86s
+- EDF: avg_wait=48.42s, p90_wait=108.76s
+- Priority: avg_wait=92.85s, p90_wait=120.66s
+- ML-Linear: avg_wait=49.72s, p90_wait=109.33s
+- ML-DecisionTree: avg_wait=53.36s, p90_wait=136.75s
+- ML-QLearning: avg_wait=43.46s, p90_wait=87.84s
+
+**Low Priority Tasks:**
+- FCFS: avg_wait=63.93s, p90_wait=111.99s
+- EDF: avg_wait=79.13s, p90_wait=117.97s
+- Priority: avg_wait=145.79s, p90_wait=165.82s
+- ML-Linear: avg_wait=64.15s, p90_wait=111.27s
+- ML-DecisionTree: avg_wait=66.55s, p90_wait=109.07s
+- ML-QLearning: avg_wait=59.21s, p90_wait=105.55s
+
+
+### Scenario: Low Priority Dominant
+
+**High Priority Tasks:**
+- FCFS: avg_wait=17.15s, p90_wait=32.09s
+- EDF: avg_wait=3.19s, p90_wait=6.26s
+- Priority: avg_wait=1.97s, p90_wait=5.59s
+- ML-Linear: avg_wait=25.99s, p90_wait=62.68s
+- ML-DecisionTree: avg_wait=17.37s, p90_wait=32.31s
+- ML-QLearning: avg_wait=17.95s, p90_wait=33.77s
+
+**Medium Priority Tasks:**
+- FCFS: avg_wait=27.77s, p90_wait=54.73s
+- EDF: avg_wait=22.61s, p90_wait=38.09s
+- Priority: avg_wait=16.50s, p90_wait=24.59s
+- ML-Linear: avg_wait=42.66s, p90_wait=106.22s
+- ML-DecisionTree: avg_wait=48.23s, p90_wait=109.02s
+- ML-QLearning: avg_wait=28.70s, p90_wait=52.37s
+
+**Low Priority Tasks:**
+- FCFS: avg_wait=94.48s, p90_wait=120.92s
+- EDF: avg_wait=97.90s, p90_wait=122.62s
+- Priority: avg_wait=99.49s, p90_wait=122.68s
+- ML-Linear: avg_wait=77.38s, p90_wait=235.76s
+- ML-DecisionTree: avg_wait=86.98s, p90_wait=131.35s
+- ML-QLearning: avg_wait=94.31s, p90_wait=125.59s
+
+
+## Processor Scaling Analysis
+### Performance Scaling by Number of Processors
+
+**FCFS Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       195.78 |             0.10 |         50.0 |            1.00x |          100.0 |
+| 2          |        81.98 |             0.20 |         47.9 |            1.92x |           95.9 |
+| 4          |        24.30 |             0.37 |         45.3 |            3.62x |           90.6 |
+
+
+**EDF Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       190.32 |             0.10 |         49.3 |            1.00x |          100.0 |
+| 2          |        78.27 |             0.20 |         48.0 |            1.94x |           97.2 |
+| 4          |        23.13 |             0.36 |         44.2 |            3.58x |           89.6 |
+
+
+**Priority Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       177.26 |             0.10 |         49.1 |            1.00x |          100.0 |
+| 2          |        72.32 |             0.20 |         48.0 |            1.96x |           97.8 |
+| 4          |        19.14 |             0.37 |         45.5 |            3.71x |           92.7 |
+
+
+**ML-Linear Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       195.52 |             0.10 |         49.3 |            1.00x |          100.0 |
+| 2          |        77.21 |             0.20 |         49.4 |            2.01x |          100.3 |
+| 4          |        21.33 |             0.39 |         47.3 |            3.84x |           95.9 |
+
+
+**ML-DecisionTree Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       199.87 |             0.10 |         49.3 |            1.00x |          100.0 |
+| 2          |        83.67 |             0.20 |         48.5 |            1.97x |           98.4 |
+| 4          |        24.83 |             0.38 |         46.6 |            3.79x |           94.7 |
+
+
+**ML-QLearning Scheduler:**
+| Processors | Avg Wait (s) | Throughput (t/s) | CPU Util (%) | Speedup (vs 1P) | Efficiency (%) |
+|------------|--------------|------------------|--------------|-----------------|----------------|
+| 1          |       200.40 |             0.10 |         49.2 |            1.00x |          100.0 |
+| 2          |        81.93 |             0.20 |         48.0 |            1.95x |           97.5 |
+| 4          |        24.50 |             0.38 |         46.1 |            3.75x |           93.8 |
+
+### Load Balancing Analysis (for Multi-Processor Scenarios)
+
+**Scenario: Dual-Processor Test (2 Processors):**
+- **FCFS**:
+  - Task Count Variance: 4.00
+  - Tasks per Processor: [27, 23]
+  - Utilization Variance: 0.25
+  - Utilizations per Processor: [48.4%, 47.4%]
+  - Balance Score (task count based): 0.200
+- **EDF**:
+  - Task Count Variance: 0.00
+  - Tasks per Processor: [25, 25]
+  - Utilization Variance: 0.07
+  - Utilizations per Processor: [47.7%, 48.2%]
+  - Balance Score (task count based): 1.000
+- **Priority**:
+  - Task Count Variance: 0.00
+  - Tasks per Processor: [25, 25]
+  - Utilization Variance: 0.06
+  - Utilizations per Processor: [48.3%, 47.8%]
+  - Balance Score (task count based): 1.000
+- **ML-Linear**:
+  - Task Count Variance: 1.00
+  - Tasks per Processor: [26, 24]
+  - Utilization Variance: 0.02
+  - Utilizations per Processor: [49.6%, 49.3%]
+  - Balance Score (task count based): 0.500
+- **ML-DecisionTree**:
+  - Task Count Variance: 4.00
+  - Tasks per Processor: [27, 23]
+  - Utilization Variance: 0.14
+  - Utilizations per Processor: [48.1%, 48.8%]
+  - Balance Score (task count based): 0.200
+- **ML-QLearning**:
+  - Task Count Variance: 1.00
+  - Tasks per Processor: [26, 24]
+  - Utilization Variance: 0.81
+  - Utilizations per Processor: [48.9%, 47.1%]
+  - Balance Score (task count based): 0.500
+
+
+**Scenario: Quad-Processor Test (4 Processors):**
+- **FCFS**:
+  - Task Count Variance: 4.25
+  - Tasks per Processor: [11, 15, 14, 10]
+  - Utilization Variance: 0.42
+  - Utilizations per Processor: [45.1%, 45.6%, 46.1%, 44.3%]
+  - Balance Score (task count based): 0.190
+- **EDF**:
+  - Task Count Variance: 1.25
+  - Tasks per Processor: [13, 14, 11, 12]
+  - Utilization Variance: 2.26
+  - Utilizations per Processor: [46.4%, 44.4%, 44.0%, 42.1%]
+  - Balance Score (task count based): 0.444
+- **Priority**:
+  - Task Count Variance: 0.75
+  - Tasks per Processor: [12, 12, 14, 12]
+  - Utilization Variance: 2.06
+  - Utilizations per Processor: [44.3%, 43.9%, 47.3%, 46.5%]
+  - Balance Score (task count based): 0.571
+- **ML-Linear**:
+  - Task Count Variance: 1.25
+  - Tasks per Processor: [12, 11, 13, 14]
+  - Utilization Variance: 0.31
+  - Utilizations per Processor: [47.6%, 46.8%, 46.7%, 48.0%]
+  - Balance Score (task count based): 0.444
+- **ML-DecisionTree**:
+  - Task Count Variance: 0.75
+  - Tasks per Processor: [12, 12, 12, 14]
+  - Utilization Variance: 1.42
+  - Utilizations per Processor: [47.5%, 47.5%, 44.6%, 46.9%]
+  - Balance Score (task count based): 0.571
+- **ML-QLearning**:
+  - Task Count Variance: 0.25
+  - Tasks per Processor: [13, 12, 12, 13]
+  - Utilization Variance: 0.82
+  - Utilizations per Processor: [47.4%, 46.0%, 44.9%, 46.3%]
+  - Balance Score (task count based): 0.800
+
+
+## Overall Priority Inversion Notes (from all scenarios):
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 1
+- Affected Tasks: 2
+- Average Resolution Time: 18.90s
+- Maximum Resolution Time: 18.90s
+
+Detailed Events (Last 10):
+  - Time: 1.40, HighP: TaskGen_1, Blocking: TaskGen_21, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 1
+- Affected Tasks: 2
+- Average Resolution Time: 16.90s
+- Maximum Resolution Time: 16.90s
+
+Detailed Events (Last 10):
+  - Time: 1.70, HighP: TaskGen_1, Blocking: TaskGen_41, OrigPrioBlock: 3
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 2
+- Affected Tasks: 3
+- Average Resolution Time: 11.30s
+- Maximum Resolution Time: 13.10s
+
+Detailed Events (Last 10):
+  - Time: 1.40, HighP: TaskGen_1, Blocking: TaskGen_21, OrigPrioBlock: 2
+  - Time: 1.40, HighP: TaskGen_1, Blocking: TaskGen_22, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 5
+- Affected Tasks: 8
+- Average Resolution Time: 9.70s
+- Maximum Resolution Time: 12.80s
+
+Detailed Events (Last 10):
+  - Time: 1.40, HighP: TaskGen_1, Blocking: TaskGen_21, OrigPrioBlock: 2
+  - Time: 1.40, HighP: TaskGen_1, Blocking: TaskGen_22, OrigPrioBlock: 2
+  - Time: 5.30, HighP: TaskGen_2, Blocking: TaskGen_23, OrigPrioBlock: 2
+  - Time: 39.70, HighP: TaskGen_18, Blocking: TaskGen_25, OrigPrioBlock: 2
+  - Time: 39.70, HighP: TaskGen_18, Blocking: TaskGen_24, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 2
+- Affected Tasks: 4
+- Average Resolution Time: 7.75s
+- Maximum Resolution Time: 8.80s
+
+Detailed Events (Last 10):
+  - Time: 5.40, HighP: TaskGen_2, Blocking: TaskGen_36, OrigPrioBlock: 2
+  - Time: 14.90, HighP: TaskGen_4, Blocking: TaskGen_37, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 3
+- Affected Tasks: 5
+- Average Resolution Time: 11.23s
+- Maximum Resolution Time: 16.20s
+
+Detailed Events (Last 10):
+  - Time: 1.10, HighP: TaskGen_1, Blocking: TaskGen_6, OrigPrioBlock: 2
+  - Time: 17.00, HighP: TaskGen_3, Blocking: TaskGen_7, OrigPrioBlock: 2
+  - Time: 17.00, HighP: TaskGen_3, Blocking: TaskGen_8, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 1
+- Affected Tasks: 2
+- Average Resolution Time: 18.00s
+- Maximum Resolution Time: 18.00s
+
+Detailed Events (Last 10):
+  - Time: 2.80, HighP: TaskGen_1, Blocking: TaskGen_21, OrigPrioBlock: 2
+
+
+### Priority Inversion for Priority in a scenario:
+
+Priority Inversion Analysis:
+- Total Events: 1
+- Affected Tasks: 2
+- Average Resolution Time: 11.10s
+- Maximum Resolution Time: 11.10s
+
+Detailed Events (Last 10):
+  - Time: 4.80, HighP: TaskGen_1, Blocking: TaskGen_41, OrigPrioBlock: 2
+
