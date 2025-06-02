@@ -1,191 +1,307 @@
-# Real-Time Task Scheduling on Raspberry Pi 3
+# Real-Time Task Scheduling System for Raspberry Pi 3
 
-This project implements and analyses various real-time task scheduling algorithms on a Raspberry Pi 3 using Python. It simulates 50 tasks with varying priorities, service times, and arrival patterns based on a Poisson distribution to evaluate different scheduling approaches. Designed for EG6801: Real-Time Embedded Systems at the University of Gloucestershire.
+## EG6801 - Real-Time Embedded System (Assignment 001)
 
-## Project Overview
+A comprehensive real-time task scheduling simulation system implementing multiple scheduling algorithms with performance analysis and machine learning optimisation.
 
-The simulation system evaluates the performance of different scheduling algorithms under various conditions, including:
-- Priority inversion scenarios
-- Varying task arrival rates
-- Different task priority distributions
-- Single vs multi-processor configurations
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [GUI Mode](#gui-mode)
+  - [Headless Mode](#headless-mode)
+  - [Comprehensive Testing](#comprehensive-testing)
+- [Scheduling Algorithms](#scheduling-algorithms)
+- [Output and Results](#output-and-results)
+- [Project Structure](#project-structure)
+- [Assignment Requirements Coverage](#assignment-requirements-coverage)
 
-The project incorporates theoretical concepts of real-time task scheduling, practical implementation using Python, performance analysis through visualisation, and machine learning-based scheduling optimisation.
+## Overview
+
+This project implements a real-time task scheduling system that simulates 50 tasks with varying priorities, service times, and arrival patterns based on Poisson distributions. The system evaluates the performance of different scheduling algorithms under various conditions, including priority inversion, delays, and memory utilisation.
+
+## Features
+
+- **Task Generation**: 50 tasks with Poisson-distributed arrival times and three priority levels
+- **Multiple Scheduling Algorithms**: FCFS, EDF, Priority-based, and ML-enhanced schedulers
+- **Multi-processor Support**: Single and multiple processor configurations
+- **Priority Inversion Handling**: Priority inheritance mechanism
+- **Machine Learning Integration**: Linear regression, decision trees, and Q-learning for optimisation
+- **Comprehensive Testing Suite**: Automated testing across multiple scenarios
+- **Rich Visualisations**: Gantt charts, performance metrics, heatmaps, and comparison plots
+- **GUI and Headless Modes**: Flexible operation for different environments
+
+## Requirements
+
+### Hardware
+- Raspberry Pi 4 (or compatible system for simulation)
+- Minimum 1GB RAM
+- 100MB free disk space
+
+## Installation
+
+1. **Clone or extract the project**:
+```bash
+# If using git
+git clone <repository-url>
+cd real-time-scheduler
+```
+
+2. **Install dependencies**:
+```bash
+pip install -r requirements.txt
+```
+
+Or install manually:
+```bash
+pip install numpy matplotlib seaborn scikit-learn pandas psutil scipy
+```
+
+3. **Verify installation**:
+```bash
+python main.py --help
+```
+
+## Usage
+
+### GUI Mode
+
+The GUI mode provides an interactive interface for configuration, simulation, and analysis.
+
+#### Starting the GUI
+```bash
+python main.py --mode gui
+# or simply
+python main.py
+```
+
+#### GUI Workflow
+
+1. **Configuration Tab**:
+   - Set random seed for reproducible results
+   - Click "Generate Tasks" to create 50 tasks
+   - Review task specifications in the display area
+   - Configure number of processors (1-4)
+   - Select schedulers to compare
+
+2. **Simulation Tab**:
+   - Click "Run Simulation" for basic simulation
+   - Click "Run Comprehensive Tests" for full test suite
+   - Monitor progress in the log window
+
+3. **Results Tab**:
+   - View generated reports
+   - Save results and visualisations
+   - Export data for further analysis
+
+### Headless Mode
+
+Ideal for automated testing, remote execution, or systems without GUI support.
+
+#### Basic Simulation
+```bash
+# Run with default settings
+python main.py --mode headless
+
+# Specify seed for reproducibility
+python main.py --mode headless --seed 42
+
+# Multi-processor simulation
+python main.py --mode headless --num-processors 4
+
+# Select specific schedulers
+python main.py --mode headless --enable-fcfs --enable-priority --enable-ml-linear
+
+# Generate plots
+python main.py --mode headless --generate-plots
+
+# Import tasks from file
+python main.py --mode headless --import-tasks tasks.json
+```
+
+#### Comprehensive Testing
+```bash
+# Run full test suite
+python main.py --mode headless --run-comprehensive-tests
+```
+
+### Comprehensive Testing
+
+The comprehensive test suite automatically runs multiple scenarios:
+
+1. **Baseline Test**: Standard configuration
+2. **High Load Test**: Increased task arrival rate
+3. **Multi-processor Tests**: 2 and 4 processor configurations
+4. **Priority Distribution Tests**: Skewed priority distributions
+5. **Extreme Service Times**: Extended task durations
+6. **Stress Test**: 100 tasks simulation
+
+Results include:
+- Detailed performance metrics
+- Statistical analysis with t-tests
+- Processor scaling analysis
+- Priority inversion reports
+- Comprehensive visualisations
+
+## Scheduling Algorithms
+
+### Traditional Algorithms
+
+1. **FCFS (First-Come-First-Served)**
+   - Tasks executed in arrival order
+   - Simple, no starvation
+   - No priority consideration
+
+2. **EDF (Earliest Deadline First)**
+   - Dynamic priority based on deadlines
+   - Optimal for single processor
+   - Deadline-driven scheduling
+
+3. **Priority-Based**
+   - Static priority levels (High/Medium/Low)
+   - Preemptive scheduling
+   - Priority inheritance for inversion handling
+
+### Machine Learning Algorithms
+
+4. **ML-Linear (Linear Regression)**
+   - Predicts waiting times
+   - Learns from completed tasks
+   - Optimises queue ordering
+
+5. **ML-DecisionTree**
+   - Categorises tasks dynamically
+   - Tree-based urgency scoring
+   - Adaptive to workload patterns
+
+6. **ML-QLearning**
+   - Reinforcement learning approach
+   - State-action value learning
+   - Balances exploration and exploitation
+
+## Output and Results
+
+### Directory Structure
+```
+results/
+├── basic_sim_[timestamp]/
+│   ├── basic_report.txt
+│   ├── gantt_*.png
+│   └── metrics_*.png
+└── comprehensive_test_[timestamp]/
+    ├── comprehensive_report.txt
+    ├── detailed_results.pkl
+    ├── processor_comparison.png
+    ├── gantt_charts/
+    ├── metrics_plots/
+    └── comparisons/
+```
+
+### Report Contents
+- **Executive Summary**: Best performers by metric
+- **Detailed Metrics**: 
+  - Average, P90, P99 waiting times
+  - CPU utilisation and throughput
+  - Queue length statistics
+- **Statistical Analysis**: T-test comparisons
+- **Priority Analysis**: Performance by priority level
+- **Processor Scaling**: Multi-processor efficiency
+
+### Visualisations
+1. **Gantt Charts**: Task execution timeline
+2. **Metrics Plots**: Queue length, memory, CPU over time
+3. **Comparison Heatmaps**: Performance across scenarios
+4. **Priority Performance**: Bar charts by priority
+5. **Processor Scaling**: Speedup and efficiency graphs
 
 ## Project Structure
 
 ```
 real-time-scheduler/
-├── src/
-│   ├── __init__.py
-│   ├── task_generator.py       # Task generation with Poisson distribution
-│   ├── schedulers/
-│   │   ├── __init__.py
-│   │   ├── fcfs.py             # First-Come-First-Served scheduler
-│   │   ├── edf.py              # Earliest Deadline First scheduler
-│   │   ├── priority_based.py   # Priority-based scheduler with inversion handling
-│   │   └── ml_scheduler.py     # Machine learning-based scheduler using decision trees
-│   ├── processors/
-│   │   ├── __init__.py
-│   │   ├── single_processor.py # Single processor implementation
-│   │   └── multi_processor.py  # Multi-processor with load balancing strategies
-│   └── utils/
-│       ├── __init__.py
-│       ├── visualisation.py    # Plotting and visualisation tools
-│       ├── metrics.py          # Performance metrics calculation
-│       ├── data_collector.py   # Data collection utilities
-│       └── platform_utils.py   # Platform detection utilities
-├── results/
-│   ├── data/                   # Raw data from simulation runs
-│   ├── logs/                   # Execution logs
-│   └── visualisations/         # Generated visualisations
-├── config/
-│   └── params.py               # Configuration parameters
-├── main.py                     # Main execution script
-├── visualise.py                # Visualisation tool for post-processing
-├── requirements.txt            # Project dependencies
-└── README.md                   # Project documentation
+├── main.py                 # Main application entry point
+├── README.md              # This file
+├── requirements.txt       # Python dependencies
+├── results/              # Output directory (created automatically)
+└── docs/                 # Additional documentation
+    └── EG6801-Assessment1.pdf
 ```
 
-## Features
+### Key Classes
 
-### Task Generation
-- Simulates 50 tasks with Poisson distribution for arrival times
-- Configurable priority levels (High, Medium, Low)
-- Customisable service times based on priority
-- Dynamic deadline assignment
+- **Task**: Task representation with timing attributes
+- **TaskGenerator**: Poisson-based task generation
+- **Scheduler Classes**: Base and specific implementations
+- **Simulator**: Main simulation engine
+- **Visualizer**: Plotting and reporting
+- **ComprehensiveTestSuite**: Automated testing
+- **GUI**: Tkinter-based interface
 
-### Scheduling Algorithms
-- **First-Come-First-Served (FCFS)**: Non-preemptive scheduling based on arrival order
-- **Earliest Deadline First (EDF)**: Preemptive scheduling prioritising tasks with earlier deadlines
-- **Priority-Based Scheduling**: Preemptive scheduling with priority inversion handling using Priority Inheritance
-- **Machine Learning-Based Scheduling**: Uses Decision Trees to predict execution times and optimise scheduling decisions
+## Assignment Requirements Coverage
 
-### Processor Configurations
-- **Single-Processor Execution**: Traditional single CPU execution
-- **Multi-Processor Execution**: Tasks distributed across multiple processors with different load-balancing strategies:
-  - Round-Robin: Simple cyclic distribution
-  - Least-Loaded: Assigns to processor with shortest queue
-  - Priority-Based: Distributes tasks based on priority and processor capabilities
+### Phase 1: Design ✓
+- Task specifications with Poisson distribution
+- Mathematical models for timing calculations
+- Three scheduling algorithms with flowcharts
+- Priority inversion handling design
+- ML-based scheduling approach
 
-### Performance Analysis
-- Comprehensive metrics collection and analysis
-- Task completion visualisation with Gantt charts
-- Memory and CPU utilisation tracking
-- Queue length monitoring
-- Resource bottleneck identification through heatmaps
-- Waiting time analysis by priority level
-- Cross-algorithm comparison using radar charts
-- Cross-platform performance comparison
+### Phase 2: Implementation ✓
+- Python implementation on Raspberry Pi 3
+- Threading and multiprocessing support
+- Memory monitoring with psutil
+- Complete scheduling systems
 
-## Installation
+### Phase 3: Testing and Analysis ✓
+- Multiple test scenarios
+- Performance metrics collection
+- Comprehensive visualisations
+- Statistical comparisons
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/real-time-scheduler.git
-   cd real-time-scheduler
+### Phase 4: Report and Presentation ✓
+- Automated report generation
+- Complete code documentation
+- Performance analysis
+- Visual demonstrations
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Import Error for tkinter**:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install python3-tk
+   
+   # Or use headless mode
+   python main.py --mode headless
    ```
 
-2. Set up a virtual environment (recommended):
+2. **Memory Issues with Large Tests**:
+   - Reduce simulation time in code
+   - Run fewer concurrent tests
+   - Use headless mode
+
+3. **Matplotlib Backend Issues**:
+   ```bash
+   export MPLBACKEND=Agg  # For non-GUI systems
    ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
 
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+### Performance Tips
 
-## Usage
+- Use consistent seeds for reproducible results
+- Close unnecessary applications during testing
+- For Raspberry Pi: Ensure adequate cooling
+- Consider using swap space for stress tests
 
-### Running Simulations
+## Contact and Support
 
-Run the main script with various command-line arguments:
+For questions about this implementation:
+- Refer to assignment documentation
+- Check code comments for implementation details
+- Review the comprehensive report for methodology
 
-```
-python main.py [options]
-```
+---
 
-### Command Line Arguments
-
-- `--single`: Run only single processor tests
-- `--multi`: Run only multi-processor tests
-- `--compare`: Compare algorithms (requires both single and multi-processor tests)
-- `--platforms`: Enable platform comparison (saves metrics for comparison)
-- `--simulation`: Force simulation mode
-- `--speed SPEED`: Set simulation speed factor (default: 10.0)
-- `--tasks NUM`: Set total number of tasks to generate
-- `--visualise`: Generate visualisations after simulation
-
-### Examples
-
-```
-# Run only single processor tests in simulation mode
-python main.py --single --simulation
-
-# Run multi-processor tests with a faster simulation speed
-python main.py --multi --simulation --speed 20.0
-
-# Run all tests and compare algorithms
-python main.py --single --multi --compare
-
-# Run with a custom number of tasks
-python main.py --single --tasks 100
-
-# Generate visualisations during execution
-python main.py --single --multi --visualise
-```
-
-### Visualisation
-
-For post-processing and visualisation of previously generated data:
-
-```
-python visualise.py --data-dir results/data/TIMESTAMP_platform_type
-```
-
-Additional visualisation options:
-```
-python visualise.py --data-dir results/data/TIMESTAMP_platform_type --output-dir custom_output
-python visualise.py --data-dir results/data/TIMESTAMP_platform_type --scheduler FCFS
-```
-
-## Output
-
-The system generates several types of output:
-
-- **Data Files**: Raw CSV and JSON data in the `results/data/` directory
-- **Visualisations**: Charts and graphs saved in the `results/visualisations/` directory, including:
-  - Task completion timelines
-  - Waiting time distributions
-  - Memory usage charts
-  - Queue length tracking
-  - Resource bottleneck heatmaps
-  - Task density heatmaps
-  - CPU utilisation heatmaps
-  - Algorithm comparison radar charts
-- **Performance Report**: A comprehensive Markdown report summarising all findings
-- **Logs**: Execution logs in the `results/logs/` directory
-
-## Configuration
-
-The simulation behaviour can be customised through the `config/params.py` file:
-
-- Task generation parameters (priority distribution, arrival rates, service times)
-- Single and multi-processor configurations
-- Simulation speed and run time
-- Machine learning parameters for the ML-based scheduler
-- Visualisation parameters
-
-## Cross-Platform Testing
-
-The project supports performance comparison across different platforms:
-
-1. Run the same task set on each platform using the `--platforms` flag
-2. Results are stored in `results/data/{timestamp}_{platform_type}/`
-3. Compare metrics across platforms using `visualise.py`
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+**Note**: This system is designed for educational purposes as part of EG6801. While it simulates real-time scheduling, actual real-time performance depends on the underlying operating system and hardware capabilities.
